@@ -1021,6 +1021,14 @@
                   (and (= op 'string-replace-all) (= 3 (count args)))
                   (every? walk args)
 
+                  ;; `(arena-scope body)`: admitted on native exactly when its
+                  ;; body is (superproject ADR-2609160044, ABI v6 -- both
+                  ;; backends lower it to the enter / leave slots around the
+                  ;; body). One operand, and it is walked: the head must not
+                  ;; launder an operand the slice cannot emit.
+                  (and (= op 'arena-scope) (= 1 (count args)))
+                  (walk (first args))
+
                   ;; Native `:document` is a string-shaped pair handle over
                   ;; UTF-8 EDN bytes. These two ops stay in
                   ;; `non-string-typed-ops` (the CLJS gate shares that set)
@@ -3459,6 +3467,19 @@
 
         (= op 'do)
         (last (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args))
+
+        ;; `(arena-scope body)` -- superproject ADR-2609160044, context ABI
+        ;; v6. On native every pair handle, pool byte, vector handle and
+        ;; vector item allocated while BODY runs is released afterwards; the
+        ;; body's type is held to :i64 / :bool / :f64 by the frontend and the
+        ;; verifier, which is what makes the release safe (no handle can be
+        ;; the result, and no mutable structure holds handles). This
+        ;; interpreter has no arena, so the head is the identity on its one
+        ;; operand -- the value is the same on every host, only the native
+        ;; arena accounting differs.
+        (= op 'arena-scope)
+        (let [[body] args]
+          (recur body env))
 
         (= op 'cap-call)
         (let [[cap-id value] args]
