@@ -59,6 +59,8 @@
             ;; string-index-of: UTF-8 byte offset through the constant oracle,
             ;; and a BigInt answer on this host
             [kotoba.kir-string-index-of-test]
+            ;; arena-scope: the identity here, the region reset on native
+            [kotoba.kir-arena-scope-test]
             [kotoba.kir-uleb-i64-test]
             ;; string-upper: the mirror of string-fold-case at the KIR eval
             [kotoba.kir-string-upper-test]
@@ -95,6 +97,7 @@
              'kotoba.kir-rodata-literal-test
              'kotoba.kir-slice-carrier-test
              'kotoba.kir-string-index-of-test
+             'kotoba.kir-arena-scope-test
              'kotoba.kir-uleb-i64-test
              'kotoba.kir-string-upper-test
              'kotoba.kir-uefi-boundary-test
