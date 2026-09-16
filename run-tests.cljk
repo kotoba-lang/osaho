@@ -63,6 +63,7 @@
             [kotoba.kir-arena-scope-test]
             [kotoba.kir-text-slots-test]
             [kotoba.kir-line-slots-test]
+            [kotoba.kir-range-slots-test]
             [kotoba.kir-uleb-i64-test]
             ;; string-upper: the mirror of string-fold-case at the KIR eval
             [kotoba.kir-string-upper-test]
@@ -102,6 +103,7 @@
              'kotoba.kir-arena-scope-test
              'kotoba.kir-text-slots-test
              'kotoba.kir-line-slots-test
+             'kotoba.kir-range-slots-test
              'kotoba.kir-uleb-i64-test
              'kotoba.kir-string-upper-test
              'kotoba.kir-uefi-boundary-test

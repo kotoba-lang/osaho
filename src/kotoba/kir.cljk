@@ -1045,6 +1045,12 @@
                   (and (= op 'string-compare-lines) (= 4 (count args)))
                   (every? walk args)
 
+                  ;; ABI v10 range operations: host slots on both native ISAs.
+                  (and (= op 'string-find-byte) (= 3 (count args)))
+                  (every? walk args)
+                  (and (= op 'string-append-range) (= 4 (count args)))
+                  (every? walk args)
+
                   ;; Native `:document` is a string-shaped pair handle over
                   ;; UTF-8 EDN bytes. These two ops stay in
                   ;; `non-string-typed-ops` (the CLJS gate shares that set)
@@ -3584,6 +3590,16 @@
         (let [[a i b j] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
               c (value/utf8-compare-lines! a #?(:clj i :cljs (js/Number i)) b #?(:clj j :cljs (js/Number j)))]
           #?(:clj (long c) :cljs (i64/->bigint c)))
+
+        ;; ABI v10 range operations (2026-09-16).
+        (= op 'string-find-byte)
+        (let [[s b from] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              k (value/utf8-find-byte! s #?(:clj b :cljs (js/Number b)) #?(:clj from :cljs (js/Number from)))]
+          #?(:clj (long k) :cljs (i64/->bigint k)))
+
+        (= op 'string-append-range)
+        (let [[acc s start end] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
+          (value/utf8-append-range! acc s #?(:clj start :cljs (js/Number start)) #?(:clj end :cljs (js/Number end))))
 
         (= op 'cap-call)
         (let [[cap-id value] args]
