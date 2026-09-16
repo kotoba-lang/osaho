@@ -1039,6 +1039,12 @@
                   (and (= op 'string-skip-blank) (= 2 (count args)))
                   (every? walk args)
 
+                  ;; ABI v8 line operations: host slots on both native ISAs.
+                  (and (= op 'string-index-of-from) (= 3 (count args)))
+                  (every? walk args)
+                  (and (= op 'string-compare-lines) (= 4 (count args)))
+                  (every? walk args)
+
                   ;; Native `:document` is a string-shaped pair handle over
                   ;; UTF-8 EDN bytes. These two ops stay in
                   ;; `non-string-typed-ops` (the CLJS gate shares that set)
@@ -3511,6 +3517,19 @@
         (let [[s from] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
               k (value/utf8-skip-blank! s #?(:clj from :cljs (js/Number from)))]
           #?(:clj (long k) :cljs (i64/->bigint k)))
+
+        ;; ABI v8 line operations (2026-09-16). Reference semantics in
+        ;; kotoba.kir.value; the empty needle traps as string-index-of's does.
+        (= op 'string-index-of-from)
+        (let [[haystack needle from] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
+          (when (empty? needle) (trap! :empty-string-search-needle {}))
+          (let [k (value/utf8-index-of-from! haystack needle #?(:clj from :cljs (js/Number from)))]
+            #?(:clj (long k) :cljs (i64/->bigint k))))
+
+        (= op 'string-compare-lines)
+        (let [[a i b j] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              c (value/utf8-compare-lines! a #?(:clj i :cljs (js/Number i)) b #?(:clj j :cljs (js/Number j)))]
+          #?(:clj (long c) :cljs (i64/->bigint c)))
 
         (= op 'cap-call)
         (let [[cap-id value] args]
