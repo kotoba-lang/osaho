@@ -39,17 +39,42 @@
 ;;
 ;; Still a limit and still fail-closed. 8 MB per i64 field is a real cost, and
 ;; a guest asking for more is refused rather than allowed to exhaust the host.
-(def vector-item-limit 16384)
+;;
+;; 16,777,216 (2^24) since 2026-09-16, owner decision (`vector-item-limit も
+;; security 的に問題なければ向上`), with the argument the 2026-09-01 note
+;; below asked for. The number is the largest ONE vector may be on any host,
+;; and each host bounds it a second time by what it was given:
+;;
+;;   * the native loader's item arena is a per-run BUDGET (KEXE_VECTOR_ITEMS,
+;;     `package-command --vector-items`; 65,536 words unless the packager
+;;     asks, refused above 2^27 words = 1 GiB), so a vector can never be
+;;     longer than the run was packaged to hold, and `vector-alloc` past the
+;;     budget traps `:vector-items-exhausted` before a byte is written;
+;;   * this interpreter allocates per element, so the constant bounds one
+;;     value at 128 MB (2^24 x 8), the largest single allocation a reference
+;;     execution can be asked for; the analysis-time constant oracle runs
+;;     under 100,000 fuel and cannot fill it;
+;;   * the Wasm host copies on write without `vector-assoc!`, which makes a
+;;     large vector SLOW there, not unsafe -- fuel and the linear memory
+;;     bound it as before.
+;;
+;; What the number buys, measured: the line-start table of a 33 MB / 769,400-
+;; line sort (org-ieee-sort's index merge sort, 2026-09-16), which 16,384
+;; refused; 2^20 (the order book's `cap`) would admit that file and refuse a
+;; 1.5 GB one that the 1 GiB pool cannot hold anyway, so the constant is set
+;; where the ARENA's maximum is rather than at one workload.
+(def vector-item-limit 16777216)
 ;; Raised to 1048576 for the order book above, then put back on 2026-09-01.
 ;; The in-place lowering had to land first -- raising the ceiling before it
 ;; only makes each copy bigger -- and it now has, so the argument above is no
-;; longer premature. It is still a SEPARATE decision: lang/surface-status.edn
-;; records :arena-bounds as :not-met with its own fail-closed argument owing,
-;; and amu's component test asserts that a length one past this traps in the
-;; core. Raising it silently inside the lowering change made that test pass
-;; for the wrong reason -- the guest was admitted, not refused -- which is
-;; the shape this file exists to prevent. Raise it with the native arena, the
-;; host budget and that test in one change that argues for the number.
+;; longer premature. It was still a SEPARATE decision: lang/surface-status.edn
+;; recorded :arena-bounds with its own fail-closed argument owing, and amu's
+;; component test asserted that a length one past this traps in the core.
+;; Raising it silently inside the lowering change made that test pass for
+;; the wrong reason -- the guest was admitted, not refused -- which is the
+;; shape this file exists to prevent. Raised 2026-09-16 with the native
+;; arena, the host budget and that test in one wave, arguing for the number
+;; above.
 ;; Canonical ABI `[:list item-descriptor]` item-count bound (see
 ;; kotoba.wasm.canonical-abi's `list-layout`). Deliberately the same
 ;; order of magnitude as this file's other bounded-sequential-collection

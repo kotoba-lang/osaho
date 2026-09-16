@@ -1985,7 +1985,7 @@
   "2^40 elements. Mirrors `kotoba.gmir/slice-item-limit` and
   `kotoba.mir/slice-item-limit`, and is an ADDRESS-SPACE bound rather than a
   window profile: amu ADR 0285's decision is that the bulk carrier does not
-  travel through the vector arena, so `vector-item-limit` (16384) is not its
+  travel through the vector arena, so `vector-item-limit` (2^24) is not its
   ceiling. The value is chosen so that `length * 8` -- the widest element this
   family carries -- cannot wrap a 64-bit address computation."
   1099511627776)
