@@ -1,5 +1,5 @@
 (ns kotoba.kir.value
-  {:kotoba/export [adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit]}
+  {:kotoba/export [utf8-compare! fold-ascii! utf8-find-blank! utf8-skip-blank! adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit]}
   (:require [kotoba.lang.text :as str]
             #?@(:cljs [[sha2.core :as sha2]
                        [kotoba.kir.cljs-i64 :as i64]]))
@@ -865,6 +865,106 @@
                                   :else [1 3])]
               (recur (+ i units) (+ byte-index bytes))))))
       -1)))
+
+;; --- ABI v7 text operations (2026-09-16) ------------------------------------
+;;
+;; Four heads the command binaries measured to need on the host side (root
+;; ADR-2609160044 follow-up): `string-compare`, `string-fold-ascii`,
+;; `string-find-blank`, `string-skip-blank`. Here they are the reference
+;; semantics over CLJC strings, in UTF-8 byte coordinates like everything
+;; above; on native they are context slots answered by the loader.
+
+(defn- code-point-units
+  "The [unit-count byte-count code-point] of the code point at UTF-16 unit
+  INDEX of VALUE, which utf8-byte-count! has already validated."
+  [value index]
+  (let [unit #?(:clj (int (.charAt ^String value index))
+                :cljs (.charCodeAt value index))]
+    (cond
+      (<= unit 0x7f) [1 1 unit]
+      (<= unit 0x7ff) [1 2 unit]
+      (<= 0xd800 unit 0xdbff)
+      (let [next-unit #?(:clj (int (.charAt ^String value (inc index)))
+                         :cljs (.charCodeAt value (inc index)))]
+        [2 4 (+ 0x10000 (bit-shift-left (- unit 0xd800) 10) (- next-unit 0xdc00))])
+      :else [1 3 unit])))
+
+(defn utf8-compare!
+  "-1, 0 or 1: A before, equal to, or after B in BYTE order. Code point order
+  and UTF-8 byte order agree, so this walks code points; a proper prefix is
+  less than what extends it. Both operands are validated as canonical UTF-8
+  first, as every string operation here is."
+  [a b]
+  (utf8-byte-count! a)
+  (utf8-byte-count! b)
+  (let [na (count a) nb (count b)]
+    (loop [i 0 j 0]
+      (cond
+        (and (>= i na) (>= j nb)) 0
+        (>= i na) -1
+        (>= j nb) 1
+        :else
+        (let [[ua _ ca] (code-point-units a i)
+              [ub _ cb] (code-point-units b j)]
+          (cond
+            (< ca cb) -1
+            (> ca cb) 1
+            :else (recur (+ i ua) (+ j ub))))))))
+
+(defn fold-ascii!
+  "VALUE with the ASCII letters A-Z lowered and every other code point kept.
+  One byte to one byte, so every UTF-8 offset into the result is the same
+  offset into VALUE -- which is what lets a search over the folded text
+  report positions in the original."
+  [value]
+  (utf8-byte-count! value)
+  #?(:clj (let [sb (StringBuilder. (count value))]
+            (dotimes [i (count value)]
+              (let [c (.charAt ^String value i)]
+                (.append sb (if (and (>= (int c) 65) (<= (int c) 90))
+                              (char (+ (int c) 32))
+                              c))))
+            (.toString sb))
+     :cljs (.replace value (js/RegExp. "[A-Z]" "g") (fn [c] (.toLowerCase c)))))
+
+(defn- blank-code-point? [c]
+  (or (= c 32) (= c 9) (= c 10) (= c 11) (= c 12) (= c 13)))
+
+(defn- utf8-scan-blank!
+  "The first UTF-8 byte offset at or after FROM whose code point satisfies
+  WANTED, or MISSING. FROM must be a code-point boundary in [0, byte-length]
+  (the byte length itself answers MISSING); anything else traps, as
+  utf8-code-point-at! does for the same reason."
+  [value from wanted missing]
+  (let [length (utf8-byte-count! value)]
+    (when-not (and (integer? from) (<= 0 from length))
+      (throw (ex-info "string scan offset is out of bounds"
+                      {:phase :value :offset from :length length})))
+    (loop [index 0 byte-index 0]
+      (if (>= index (count value))
+        missing
+        (let [[units bytes code-point] (code-point-units value index)]
+          (cond
+            (< byte-index from)
+            (if (> (+ byte-index bytes) from)
+              (throw (ex-info "string scan offset splits a UTF-8 code point"
+                              {:phase :value :offset from}))
+              (recur (+ index units) (+ byte-index bytes)))
+            (wanted (blank-code-point? code-point)) byte-index
+            :else (recur (+ index units) (+ byte-index bytes))))))))
+
+(defn utf8-find-blank!
+  "The first byte offset at or after FROM holding a blank -- space, tab,
+  newline, vertical tab, form feed or carriage return, the C locale's
+  isspace -- or -1."
+  [value from]
+  (utf8-scan-blank! value from true? -1))
+
+(defn utf8-skip-blank!
+  "The first byte offset at or after FROM holding a NON-blank, or the byte
+  length when the rest is blank."
+  [value from]
+  (utf8-scan-blank! value from false? (utf8-byte-count! value)))
 
 (defn utf8-code-point-at!
   "Return the Unicode code point of the UTF-8 sequence that STARTS at BYTE-OFFSET
