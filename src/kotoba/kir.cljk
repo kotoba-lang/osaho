@@ -2942,6 +2942,60 @@
         (value/f32-to-i64-bits (add (add s0 s1) (add s2 s3)))))))
 ;; dequant: end
 
+;; rodata-in-oracle (aiueos ADR-0221): when the caller supplies a `:memory`
+;; image, a `bytes-literal` CAN have an address here -- the literal's bytes
+;; are placed in that image, past everything the caller laid out, and the
+;; head answers with where they went. Without an image the trap below stands
+;; unchanged. This is the one place the oracle decodes hex, and only for the
+;; `:hex-bytes` encoding: `ucs2` and `guid` are firmware-side encodings
+;; (`kotoba.gmir/rodata-bytes` owns them) and keep refusing.
+;;
+;; Why an image and not a second store: a program that reads a literal
+;; through `kernel-load-u8` does so with the SAME window check every other
+;; load gets, so the pool has to be addressable by the same `image-slot`.
+;; Placing it at the tail of the caller's image means no offset the caller
+;; laid out moves, and the caller's `:expect-memory` assertions stay where
+;; they were.
+(defn- hex-byte-values
+  "The bytes of an even-length hex string, or nil."
+  [text]
+  (when (hex-pair-count text)
+    (let [digit (fn [character]
+                  (let [code #?(:clj (int character) :cljs (.charCodeAt character 0))]
+                    (cond (<= 48 code 57) (- code 48)
+                          (<= 97 code 102) (- code 87)
+                          :else (- code 55))))]
+      (mapv (fn [i] (+ (* 16 (digit (nth text (* 2 i)))) (digit (nth text (inc (* 2 i))))))
+            (range (quot (count text) 2))))))
+
+(defn- rodata-literal-texts
+  "Every `(bytes-literal \"...\")` text in FUNCTIONS, in first-occurrence order."
+  [functions]
+  (distinct
+   (for [{:keys [body]} functions
+         form (tree-seq coll? seq body)
+         :when (and (seq? form) (= 'bytes-literal (first form)) (string? (second form)))]
+     (second form))))
+
+(defn- place-rodata!
+  "Append each literal's bytes to the image (8-aligned, `kotoba.gmir`'s pool
+  alignment) and return text -> address. The image's vector grows; nothing
+  already in it moves."
+  [memory functions]
+  (when memory
+    (let [bytes (:bytes memory)]
+      (reduce (fn [pool text]
+                (let [values (or (hex-byte-values text)
+                                 (throw (ex-info "rodata literal is not even-length hex"
+                                                 {:phase :ir :content text})))
+                      image @bytes
+                      padded (let [r (mod (count image) 8)] (if (zero? r) 0 (- 8 r)))
+                      at (+ (count image) padded)]
+                  (vswap! bytes #(into (into % (repeat padded 0)) values))
+                  (assoc pool text (word-plus (:base memory) (->word at)))))
+              {}
+              (rodata-literal-texts functions)))))
+
 (defn- validated-memory
   "Admit an optional `:memory` image for `execute`."
   [memory]
@@ -5010,7 +5064,11 @@
         ;; this machine is not running, and this one names a place in an image
         ;; that does not exist.
         (contains? rodata-address-operations op)
-        (trap! :rodata-address-unavailable {:operation op})
+        (if-let [address (and (= op 'bytes-literal)
+                              (get (:rodata (:memory heap)) (second form)))]
+          ;; rodata-in-oracle: the literal was placed in the caller's image
+          address
+          (trap! :rodata-address-unavailable {:operation op}))
 
         ;; boot-scratch: a place in the image's own layout -- its `.data`
         ;; reservation, or a function's label. There is no image here, and no
@@ -5169,7 +5227,9 @@
      (validated-closure-param-indexes function)
      (validated-i64-pair-chain-param-indexes function)
      (validated-closure-result? function))
-   (let [memory-image (validated-memory memory)
+   (let [memory-image (let [image (validated-memory memory)]
+                        (cond-> image
+                          image (assoc :rodata (place-rodata! image (:functions kir)))))
          cap-dispatch (when (or cap-call typed-cap-call)
                         (fn
                           ([cap-id value]
