@@ -1029,6 +1029,16 @@
                   (and (= op 'arena-scope) (= 1 (count args)))
                   (walk (first args))
 
+                  ;; ABI v7 text operations: host slots on both native ISAs.
+                  (and (= op 'string-compare) (= 2 (count args)))
+                  (every? walk args)
+                  (and (= op 'string-fold-ascii) (= 1 (count args)))
+                  (walk (first args))
+                  (and (= op 'string-find-blank) (= 2 (count args)))
+                  (every? walk args)
+                  (and (= op 'string-skip-blank) (= 2 (count args)))
+                  (every? walk args)
+
                   ;; Native `:document` is a string-shaped pair handle over
                   ;; UTF-8 EDN bytes. These two ops stay in
                   ;; `non-string-typed-ops` (the CLJS gate shares that set)
@@ -3480,6 +3490,27 @@
         (= op 'arena-scope)
         (let [[body] args]
           (recur body env))
+
+        ;; ABI v7 text operations (2026-09-16). Reference semantics in
+        ;; kotoba.kir.value; each answers an i64 as a BigInt on cljs like the
+        ;; other byte-offset heads.
+        (= op 'string-compare)
+        (let [[a b] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              c (value/utf8-compare! a b)]
+          #?(:clj (long c) :cljs (i64/->bigint c)))
+
+        (= op 'string-fold-ascii)
+        (value/fold-ascii! (eval-expr (first args) env functions fuel heap call-stack cap-call))
+
+        (= op 'string-find-blank)
+        (let [[s from] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              k (value/utf8-find-blank! s #?(:clj from :cljs (js/Number from)))]
+          #?(:clj (long k) :cljs (i64/->bigint k)))
+
+        (= op 'string-skip-blank)
+        (let [[s from] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              k (value/utf8-skip-blank! s #?(:clj from :cljs (js/Number from)))]
+          #?(:clj (long k) :cljs (i64/->bigint k)))
 
         (= op 'cap-call)
         (let [[cap-id value] args]
