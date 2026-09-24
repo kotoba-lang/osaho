@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -324,6 +324,76 @@
        (= (count (nth type 2))
           (count (distinct (map first (nth type 2)))))))
 
+;; ── recursive and generic aggregates as one-word handles ────────────────
+;;
+;; Every aggregate the native backends carry is ONE machine word: a record is
+;; a declaration-order pair chain, a variant is pair(ordinal, payload), an
+;; option/result is pair(tag, payload) (kotoba-native aggregate ABI v7). A
+;; field or payload is therefore admissible whenever it is itself such a word
+;; -- the representation never needed to know what the word points at. What
+;; held recursive ADTs back was only these predicates: each spelled out the
+;; payload universe as scalars plus an inline record, so `[:ref :app/node]`
+;; (the only way a type can mention itself) and a heterogeneous vector of
+;; children were refused although both lower to the same pair cells.
+;;
+;; `[:ref q]` is admitted against the module's closed `:schemas` table,
+;; coinductively: a reference already being checked is assumed admitted, which
+;; is sound because the frontend (`kotoba.compiler.schema/validate-table!`)
+;; already refuses a non-productive cycle. Structural equality over a handle
+;; (`hetero-vector-equal`, `record-equal`, typed sets of handles) is NOT
+;; admitted: comparing two handles compares cells, not values.
+(def ^:dynamic *native-schemas*
+  "The module's closed schema table while `only-native-word-typed-features?`
+  checks it. Unbound (nil) means no `[:ref ...]` is admitted."
+  nil)
+
+(def ^:private max-native-aggregate-members 32)
+(def ^:private max-native-aggregate-depth 32)
+
+(declare native-handle-type?)
+
+(defn- native-member-list? [members depth seen]
+  (and (vector? members) (<= 1 (count members) max-native-aggregate-members)
+       (every? #(and (vector? %) (= 2 (count %)) (keyword? (first %))
+                     (native-handle-type? (second %) (inc depth) seen))
+               members)
+       (= (count members) (count (distinct (map first members))))))
+
+(defn- native-handle-type?
+  "True when TYPE travels as one native word: a scalar, a pair-backed
+  string/option/result, or a record / variant / heterogeneous vector whose
+  members are themselves such words, including through `[:ref ...]`."
+  ([type] (native-handle-type? type 0 #{}))
+  ([type depth seen]
+   (and (<= depth max-native-aggregate-depth)
+        (or (native-word-value-type? type)
+            (native-scalar-record-type? type)
+            (and (vector? type) (seq type)
+                 (case (first type)
+                   :ref (and (= 2 (count type)) (keyword? (second type))
+                             (contains? *native-schemas* (second type))
+                             (or (contains? seen (second type))
+                                 (native-handle-type? (get *native-schemas* (second type))
+                                                      (inc depth)
+                                                      (conj seen (second type)))))
+                   (:record :variant)
+                   (and (= 3 (count type)) (keyword? (second type))
+                        (some? (namespace (second type)))
+                        (native-member-list? (nth type 2) depth seen))
+                   :vector (and (= 2 (count type)) (vector? (second type))
+                                (<= 1 (count (second type)) max-native-aggregate-members)
+                                (every? #(native-handle-type? % (inc depth) seen)
+                                        (second type)))
+                   :option (and (= 2 (count type))
+                                (native-handle-type? (second type) (inc depth) seen))
+                   :result (and (= 3 (count type))
+                                (native-handle-type? (second type) (inc depth) seen)
+                                (native-handle-type? (nth type 2) (inc depth) seen))
+                   false))))))
+
+(defn- native-aggregate-of? [head type]
+  (and (vector? type) (= head (first type)) (native-handle-type? type)))
+
 (def ^:private native-clock-request-type
   [:variant :kotoba.clock/request [[:wall :bool] [:monotonic :bool]]])
 
@@ -544,7 +614,13 @@
 
 (defn- native-function-boundary-type? [type schemas exported?]
   (or (native-boundary-type? type schemas)
-      (and (not exported?) (native-private-handle-type? type))))
+      (and (not exported?)
+           (or (native-private-handle-type? type)
+               ;; A recursive/generic aggregate handle crosses an INTERNAL
+               ;; call as the one word it already is. An export stays on the
+               ;; narrower host-validated set above: no loader can yet build
+               ;; or validate a handle graph it did not allocate.
+               (native-handle-type? type)))))
 
 (defn- native-export-copy-result-type? [type]
   ;; KEXE export copy ABI v1 initially owns only top-level vector results.
@@ -602,6 +678,34 @@
                  native-f64-comparison-operations
                  native-f32-comparison-operations]))
 
+(defn recursive-schema-table?
+  "True when some schema in TABLE reaches itself through `[:ref ...]`."
+  [table]
+  (letfn [(refs [node]
+            (keep #(when (and (vector? %) (= 2 (count %)) (= :ref (first %)))
+                     (second %))
+                  (tree-seq coll? seq node)))
+          (reaches? [start]
+            (loop [frontier (vec (refs (get table start))) seen #{}]
+              (if-let [name (first frontier)]
+                (cond (= name start) true
+                      (contains? seen name) (recur (subvec frontier 1) seen)
+                      :else (recur (into (subvec frontier 1) (refs (get table name)))
+                                   (conj seen name)))
+                false)))]
+    (boolean (and (map? table) (some reaches? (keys table))))))
+
+(defn native-program
+  "The closed program a native artifact seals and its verifier re-executes.
+
+  `:schemas` joins it only for a RECURSIVE table. A recursive type cannot be
+  expanded into its signatures, so without the table the verifier's oracle
+  cannot resolve `[:ref q]` and refuses the artifact. A non-recursive table
+  is left out exactly as before, so no existing module's `:kir-sha256` moves."
+  [kir]
+  (cond-> (select-keys kir [:format :entry :exports :signature :effects :functions])
+    (recursive-schema-table? (:schemas kir)) (assoc :schemas (:schemas kir))))
+
 (defn only-native-word-typed-features? [hir]
   (letfn [(walk [form]
             (cond
@@ -632,7 +736,8 @@
                   ;; sealed data, never walked as an expression.
                   (= op 'record-new)
                   (let [[type & values] args]
-                    (and (native-scalar-record-type? type)
+                    (and (or (native-scalar-record-type? type)
+                             (native-aggregate-of? :record type))
                          (= (count values) (count (nth type 2)))
                          (every? walk values)))
                   ;; Projection: the codegen backends require `value` to be
@@ -645,7 +750,8 @@
                   (= op 'record-get)
                   (let [[type value field] args]
                     (and (= 3 (count args))
-                         (native-scalar-record-type? type)
+                         (or (native-scalar-record-type? type)
+                             (native-aggregate-of? :record type))
                          (keyword? field)
                          (some #(= field (first %)) (nth type 2))
                          (walk value)))
@@ -658,7 +764,8 @@
                   (= op 'variant-new)
                   (let [[type tag payload] args]
                     (and (= 3 (count args))
-                         (native-scalar-variant-type? type)
+                         (or (native-scalar-variant-type? type)
+                             (native-aggregate-of? :variant type))
                          (keyword? tag)
                          (some #(= tag (first %)) (nth type 2))
                          (walk payload)))
@@ -674,7 +781,8 @@
                   (= op 'variant-match)
                   (let [[type value branches] args]
                     (and (= 3 (count args))
-                         (native-scalar-variant-type? type)
+                         (or (native-scalar-variant-type? type)
+                             (native-aggregate-of? :variant type))
                          (vector? branches)
                          (= (mapv first (nth type 2)) (mapv first branches))
                          (every? #(and (vector? %) (= 3 (count %)) (symbol? (second %))) branches)
@@ -875,43 +983,43 @@
                   (let [[type value] args]
                     (and (= 2 (count args))
                          (vector? type) (= :option (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (walk value)))
                   (= op 'option-none-of)
                   (let [[type] args]
                     (and (= 1 (count args))
                          (vector? type) (= :option (first type))
-                         (native-word-value-type? type)))
+                         (native-handle-type? type)))
                   (= op 'option-value-of)
                   (let [[type value fallback] args]
                     (and (= 3 (count args))
                          (vector? type) (= :option (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (walk value) (walk fallback)))
                   (= op 'option-match)
                   (let [[type value none-body binder some-body] args]
                     (and (= 5 (count args))
                          (vector? type) (= :option (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (symbol? binder)
                          (walk value) (walk none-body) (walk some-body)))
                   (contains? '#{result-ok-of result-err-of result-ok?-of} op)
                   (let [[type value] args]
                     (and (= 2 (count args))
                          (vector? type) (= :result (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (walk value)))
                   (contains? '#{result-value-of result-error-of} op)
                   (let [[type value fallback] args]
                     (and (= 3 (count args))
                          (vector? type) (= :result (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (walk value) (walk fallback)))
                   (= op 'result-match-of)
                   (let [[type value ok-binder ok-body err-binder err-body] args]
                     (and (= 6 (count args))
                          (vector? type) (= :result (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (symbol? ok-binder) (symbol? err-binder)
                          (walk value) (walk ok-body) (walk err-body)))
                   ;; `i32-operations` are admitted on native. They stay in
@@ -1015,6 +1123,29 @@
                   ;; two operations are refused a second time by
                   ;; `kotoba.verifier/string-operations`, which re-derives its
                   ;; own table. Both gates had to open; see this repo's ADR 0222.
+                  ;; A heterogeneous vector is a declaration-order pair chain,
+                  ;; exactly a record whose fields are positions; every index
+                  ;; is a literal in range, so projection is a fixed walk.
+                  (= op 'hetero-vector-new)
+                  (let [[type & items] args]
+                    (and (native-aggregate-of? :vector type)
+                         (= (count items) (count (second type)))
+                         (every? walk items)))
+                  (= op 'hetero-vector-count)
+                  (let [[type value] args]
+                    (and (= 2 (count args))
+                         (native-aggregate-of? :vector type)
+                         (walk value)))
+                  (contains? '#{hetero-vector-at hetero-vector-assoc} op)
+                  (let [[type value index item] args]
+                    (and (= (if (= op 'hetero-vector-at) 3 4) (count args))
+                         (native-aggregate-of? :vector type)
+                         #?(:clj (integer? index)
+                            :cljs (or (i64/bigint-value? index) (integer? index)))
+                         (<= 0 index) (< index (count (second type)))
+                         (walk value)
+                         (or (= op 'hetero-vector-at) (walk item))))
+
                   (and (= op 'string-contains?) (= 2 (count args)))
                   (every? walk args)
 
@@ -1115,6 +1246,7 @@
               :else true))]
     (let [schemas (:schemas hir)
           exports (set (:exports hir))]
+      (binding [*native-schemas* schemas]
       (every? (fn [{:keys [params param-types result body name]}]
                 (let [exported? (contains? exports name)]
                   (and (every? #(native-function-boundary-type? % schemas exported?)
@@ -1141,7 +1273,7 @@
                        (and (not= name (:entry hir))
                             (native-function-boundary-type? result schemas exported?)))
                        (walk body))))
-            (:functions hir)))))
+            (:functions hir))))))
 
 (defn only-cljs-provider-typed-features?
   "True when typed values appear only as function boundary types and sealed
