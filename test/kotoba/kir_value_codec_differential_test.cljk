@@ -52,7 +52,7 @@
   through dimensions 2 and 3."
   (:require [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
-            [clojure.edn :as edn]
+            [kotoba.lang.edn :as edn]
             [cbor.core :as cbor]
             [ipld.value :as value]
             [kotoba.kir.definition-identity :as identity]))
