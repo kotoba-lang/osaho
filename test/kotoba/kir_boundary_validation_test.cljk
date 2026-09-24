@@ -119,7 +119,7 @@
                              :body (list 'if (list '<= 'n 0) 0
                                          (list '+ 1 (list 'deep (list '- 'n 1))))}]}]
     (is (= :budget/frames (trap-of #(kir/execute module 'main [] {:frames 3}))))
-    (is (= 10000 kir/default-frames))
+    (is (= 32 kir/default-frames) "lang/limits.edn :profile/reference :frames (P4)")
     (testing "a frames budget outside the admitted range is refused before running"
       (is (thrown? #?(:clj Exception :cljs :default)
                    (kir/execute module 'main [] {:frames 0}))))))

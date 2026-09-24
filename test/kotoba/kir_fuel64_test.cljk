@@ -78,7 +78,7 @@
 (deftest the-loop-costs-what-this-file-says-it-costs
   ;; Without this the two numbers below are asserted against themselves.
   (is (= iterations (run cost iterations)) "exactly enough")
-  (is (= :fuel-exhausted (:trap (trap-of #(run (dec cost) iterations))))
+  (is (= :budget/fuel (:trap (trap-of #(run (dec cost) iterations))))
       "one short"))
 
 (deftest a-budget-past-2-to-the-31-is-carried-not-truncated
@@ -88,9 +88,9 @@
                         ["the ceiling itself" ir/max-fuel]]]
     (is (= iterations (run fuel iterations)) label))
   (testing "and the low word alone is not enough, which is what makes it a test"
-    (is (= :fuel-exhausted (:trap (trap-of #(run 100 iterations))))
+    (is (= :budget/fuel (:trap (trap-of #(run 100 iterations))))
         "4,294,967,396 truncated to 32 bits is 100")
-    (is (= :fuel-exhausted (:trap (trap-of #(run 1500 3000))))
+    (is (= :budget/fuel (:trap (trap-of #(run 1500 3000))))
         "4,294,968,796 truncated to 32 bits is 1,500")
     (is (= 3000 (run 4294968796 3000))
         "and the same run completes at the real budget")))

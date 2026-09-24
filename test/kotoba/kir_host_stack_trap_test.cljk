@@ -15,7 +15,8 @@
   `:cljs` branch had never been executed at all.
 
   So this asserts the INVARIANT and not the limit: whatever runs out first,
-  what comes out is `:fuel-exhausted` with `:phase :ir`, and never a host
+  what comes out is a named resource trap (`:budget/fuel`, `:budget/frames`
+  or `:host/stack-exhausted`, reported by `lower` as `:oracle-inconclusive`), and never a host
   error object."
   (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
@@ -53,7 +54,7 @@
    `{:type :sci/error :line .. :column ..}` -- non-nil, and WITHOUT `:trap`.
    A classifier that stops at the first link therefore sees `:trap nil` and
    reports a Kotoba trap as an unclassified failure. Measured here at depth 16
-   on nbb 1.4.210: the same program reports `:trap :fuel-exhausted` when
+   on nbb 1.4.210: the same program reports `:trap :budget/fuel` when
    `lower` is called directly and `:trap nil` when it is called from inside a
    `deftest`, because the wrapping depends on what is between the two.
 
@@ -73,7 +74,13 @@
   "`:folded`, or the trap that aborted `lower`, or -- if there is no trap
    anywhere in the chain -- the host error that escaped."
   [n]
-  (try (do (ir/lower (unbounded-recursion-hir n)) :folded)
+  ;; Since P4 of adr-2609242100 a RESOURCE trap no longer aborts `lower`: the
+  ;; oracle is inconclusive (`:oracle-inconclusive <trap>`), which is neither
+  ;; a folded value nor a refusal. It is reported here as the trap it was.
+  (try (let [kir (ir/lower (unbounded-recursion-hir n))]
+         (if-let [trap (:oracle-inconclusive kir)]
+           {:trap trap :phase :ir :oracle :inconclusive}
+           :folded))
        (catch #?(:clj Throwable :cljs :default) e
          (or (trap-data e)
              {:host-error-escaped (str (ex-message e))}))))
@@ -82,7 +89,7 @@
   (testing "the compiler refuses, and refuses in its own vocabulary"
     (let [outcome (lower-outcome 1000000)]
       (is (not= :folded outcome)
-          "a program the oracle cannot finish must abort lower, not return")
+          "a program the oracle cannot finish must not fold")
       (is (nil? (:host-error-escaped outcome))
           (str "a host error escaped the language boundary: "
                (pr-str (:host-error-escaped outcome))))
@@ -91,7 +98,7 @@
       ;; the deterministic call-depth budget, and the host's own stack. Which
       ;; one a million-deep recursion reaches first is the host's business;
       ;; that it is one of these three, by name, is the invariant.
-      (is (contains? #{:fuel-exhausted :budget/frames :host/stack-exhausted}
+      (is (contains? #{:budget/fuel :budget/frames :host/stack-exhausted}
                      (:trap outcome))
           (str "not a named resource trap: " (pr-str outcome))))))
 
@@ -138,7 +145,7 @@
       (is (nil? (:host-error-escaped outcome))
           (str "at depth " depth " a host error escaped: "
                (pr-str (:host-error-escaped outcome))))
-      (is (contains? #{:fuel-exhausted :budget/frames :host/stack-exhausted}
+      (is (contains? #{:budget/fuel :budget/frames :host/stack-exhausted}
                      (:trap outcome))
           (str "at depth " depth)))))
 

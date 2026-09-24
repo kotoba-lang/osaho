@@ -411,7 +411,7 @@
   ;; additions are given.
   (let [packed (q8-0-block (half-bits :one) (vec (repeat 32 1)))
         activations (vec (repeat 32 (f32 1.0)))]
-    (is (= :fuel-exhausted
+    (is (= :budget/fuel
            (:trap
             (trapped #(run 'kernel-dequant-dot-q8-0 packed activations 1 {:fuel 8}))))
         "eight units cannot cover thirty-two elements")))
