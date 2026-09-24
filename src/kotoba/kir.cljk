@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* budget-traps default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations budget-traps default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -168,6 +168,7 @@
      variant-new variant-match
      option-some-of option-none-of option-some?-of option-value-of option-match
      typed-list-new typed-list-nth bytes-empty
+     bytes-count bytes-at bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes string-from-utf8
      hetero-vector-new hetero-vector-count hetero-vector-at hetero-vector-assoc hetero-vector-equal
      typed-set-new typed-set-count typed-set-contains typed-set-conj typed-set-disj typed-set-equal typed-set-nth
      typed-map-new typed-map-count typed-map-contains typed-map-get
@@ -629,6 +630,11 @@
         (native-scalar-record-type? type)
         (native-boundary-scalar-variant-type? type))))
 
+;; The bytes heads native admits, with their arities (see the admission walk).
+(def native-bytes-operations
+  '{bytes-empty 0 bytes-count 1 bytes-at 2 bytes-slice 3 bytes-concat 2
+    bytes-from-vector-i64 1 vector-i64-from-bytes 1 string-from-utf8 1})
+
 (defn- native-private-handle-type? [type]
   ;; Native vectors and string indexes are context-owned handles. They are one
   ;; machine word at an internal call boundary, but they are not a host ABI:
@@ -636,7 +642,8 @@
   ;; through a kexe export.
   ;; Keep this deliberately non-recursive so option/result ownership is not
   ;; widened as a side effect.
-  (contains? #{:vector-i64 :vector-f64 :string-index} type))
+  ;; `:bytes` joined 2026-09-25: on native it is a vector-arena handle too.
+  (contains? #{:vector-i64 :vector-f64 :string-index :bytes} type))
 
 (defn- native-function-boundary-type? [type schemas exported?]
   (or (native-boundary-type? type schemas)
@@ -1097,6 +1104,17 @@
                                 vector-f64-assoc vector-f64-conj}
                              op)
                   (every? walk args)
+                  ;; `:bytes` (2026-09-25, superproject adr-2609242330). On
+                  ;; native a bytes value is a vector-arena handle whose items
+                  ;; are 0..255 -- one word, the vector discipline above. The
+                  ;; TYPE keeps it apart from `:vector-i64` (every checker
+                  ;; refuses one where the other is expected); only the
+                  ;; representation is shared. Construction validates in the
+                  ;; host (context ABI v11), which is also where
+                  ;; `string-from-utf8` decides canonical UTF-8.
+                  (contains? native-bytes-operations op)
+                  (and (= (count args) (get native-bytes-operations op))
+                       (every? walk args))
                   ;; typed-set is a host-table handle, the same width as
                   ;; vector-i64. The type descriptor is sealed data, like
                   ;; record-new's first argument, and is not walked.
@@ -1460,6 +1478,7 @@
      hetero-vector-new hetero-vector-assoc typed-list-new typed-set-new
      typed-set-conj typed-set-disj typed-map-new typed-map-assoc typed-map-dissoc
      record-new record-assoc vector-new vector-conj vector-assoc vector-assoc!
+     bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes
      vector-alloc vector-drop vector-take vector-f64-new vector-f64-conj
      vector-f64-assoc vector-f64-drop vector-f64-take string-index-new
      string-index-assoc disjoint-set-i64-new disjoint-set-i64-union
@@ -3926,6 +3945,71 @@
 
         (= op 'bytes-empty)
         (value/empty-bytes)
+
+        ;; `:bytes` as a guest value (2026-09-25, superproject
+        ;; adr-2609242330). Until now only the Wasm host answered these
+        ;; four; the reference refused them as unknown functions, so no
+        ;; program using them had an oracle.
+        (= op 'bytes-count)
+        (let [b (eval-expr (first args) env functions fuel heap call-stack cap-call)
+              n (value/bytes-byte-count b)]
+          #?(:clj (long n) :cljs (i64/->bigint n)))
+
+        (= op 'bytes-at)
+        (let [[b index] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              n (value/bytes-byte-count b)
+              i #?(:clj index :cljs (js/Number index))]
+          (when-not (and (<= 0 i) (< i n))
+            (trap! :bytes/index-out-of-range {:index i :count n}))
+          (let [byte (nth (value/bytes-items (value/bytes-slice-of b i (inc i))) 0)]
+            #?(:clj (long byte) :cljs (i64/->bigint byte))))
+
+        (= op 'bytes-slice)
+        (let [[b start end] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              n (value/bytes-byte-count b)
+              s #?(:clj start :cljs (js/Number start))
+              e #?(:clj end :cljs (js/Number end))]
+          (when-not (and (<= 0 s) (<= s e) (<= e n))
+            (trap! :bytes/slice-bounds {:start s :end e :count n}))
+          (value/bytes-slice-of b s e))
+
+        (= op 'bytes-concat)
+        (let [[left right] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)
+              total (+ (value/bytes-byte-count left) (value/bytes-byte-count right))]
+          (when (> total value/bytes-value-byte-limit)
+            (trap! :bytes/too-large {:bytes total :limit value/bytes-value-byte-limit}))
+          (value/concat-bytes [left right]))
+
+        ;; (bytes-from-vector-i64 v): the one way a program BUILDS bytes.
+        ;; Refuses rather than masks: an item outside [0,255] is a bug at the
+        ;; call site, and masking it would hand back bytes nobody wrote.
+        (= op 'bytes-from-vector-i64)
+        (let [items (eval-expr (first args) env functions fuel heap call-stack cap-call)]
+          (when (> (count items) value/bytes-value-byte-limit)
+            (trap! :bytes/too-large {:bytes (count items) :limit value/bytes-value-byte-limit}))
+          (when-let [i (value/bytes-item-out-of-range-at items)]
+            (trap! :bytes/item-out-of-range {:index i}))
+          (value/bytes-from-items items))
+
+        (= op 'vector-i64-from-bytes)
+        (let [b (eval-expr (first args) env functions fuel heap call-stack cap-call)]
+          (mapv #(do #?(:clj (long %) :cljs (i64/->bigint %))) (value/bytes-items b)))
+
+        ;; (string-from-utf8 b): the string constructor. Canonical UTF-8
+        ;; only -- `value/utf8-invalid-at` names the first bad sequence and
+        ;; that name is the trap; nothing is ever replaced with U+FFFD. The
+        ;; value bound is checked first (a string is at most
+        ;; `string-value-byte-limit` bytes whatever its bytes say), and the
+        ;; result is charged to the run's `:bytes` budget like every other
+        ;; string a run produces.
+        (= op 'string-from-utf8)
+        (let [b (eval-expr (first args) env functions fuel heap call-stack cap-call)
+              n (value/bytes-byte-count b)]
+          (when (> n value/string-value-byte-limit)
+            (trap! :string/too-large {:bytes n :limit value/string-value-byte-limit}))
+          (when-let [[reason offset] (value/utf8-invalid-at b)]
+            (trap! reason {:offset offset}))
+          (charge-bytes! heap (value/utf8-decode-canonical b) op))
 
         ;; Guest poll (ADR 0127): 1 if ready, 0 if pending; cancelled traps.
         (= op 'task-ready?)

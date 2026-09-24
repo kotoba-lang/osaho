@@ -71,6 +71,8 @@
             [kotoba.kir-text-slots-test]
             [kotoba.kir-line-slots-test]
             [kotoba.kir-range-slots-test]
+            ;; :bytes as a guest value and the string constructor (2026-09-25)
+            [kotoba.kir-string-from-utf8-test]
             [kotoba.kir-uleb-i64-test]
             ;; string-upper: the mirror of string-fold-case at the KIR eval
             [kotoba.kir-string-upper-test]
@@ -115,6 +117,7 @@
              'kotoba.kir-text-slots-test
              'kotoba.kir-line-slots-test
              'kotoba.kir-range-slots-test
+             'kotoba.kir-string-from-utf8-test
              'kotoba.kir-uleb-i64-test
              'kotoba.kir-string-upper-test
              'kotoba.kir-uefi-boundary-test

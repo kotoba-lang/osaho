@@ -235,6 +235,18 @@
     (reduce (fn [result item] (walk item result)) (conj found :symbol) value)
     (and (seq? value) (= 'bytes-empty (first value)))
     (conj found :bytes)
+    ;; 2026-09-25 (superproject adr-2609242330): every other bytes head, and
+    ;; the two conversions and the string constructor, name BOTH of their
+    ;; types -- a host that receives the operand and builds the result checks
+    ;; each against its sealed descriptor, and a module whose signatures
+    ;; mention neither (bytes built and consumed inside one body) would
+    ;; otherwise have no descriptor for them at all.
+    (and (seq? value) (contains? '#{bytes-count bytes-at bytes-slice bytes-concat} (first value)))
+    (reduce (fn [result item] (walk item result)) (conj found :bytes) value)
+    (and (seq? value) (contains? '#{bytes-from-vector-i64 vector-i64-from-bytes} (first value)))
+    (reduce (fn [result item] (walk item result)) (conj found :bytes :vector-i64) value)
+    (and (seq? value) (= 'string-from-utf8 (first value)))
+    (reduce (fn [result item] (walk item result)) (conj found :bytes :string) value)
     (map? value) (reduce (fn [result item] (walk item result)) found (vals value))
     (coll? value) (reduce (fn [result item] (walk item result)) found value)
     (string? value) (conj found :string)
