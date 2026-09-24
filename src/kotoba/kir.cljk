@@ -5830,8 +5830,12 @@
         ;; not answered, and that is neither a value nor a refusal of the
         ;; program. It is recorded as `:oracle-inconclusive <trap>` and
         ;; `:oracle-value` stays nil; every other trap still aborts `lower`.
+        ;; `:state` (kotoba-lang `lang/state-ability.edn`) is a pure ability:
+        ;; the frontend lowered it to state passing and its handler is part of
+        ;; the program, so a module whose only row member is `:state` is as
+        ;; deterministic as a pure one and is oracled like one.
         oracle (when (and (:entry hir) (contains? #{:i64 :bool} (:result hir))
-                          (empty? (:effects hir)) (not kernel-native?))
+                          (every? #{:state} (:effects hir)) (not kernel-native?))
                  (try
                    {:value (execute base (:entry hir) []
                                     (cond-> {:fuel (or (:oracle-fuel opts) default-oracle-fuel)}

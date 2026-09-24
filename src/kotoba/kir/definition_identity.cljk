@@ -347,8 +347,16 @@
   decided the same question in opposite directions, and amu's pin sat one
   commit short of here until kotoba-lang adjudicated
   (`docs/adr/ADR-abort-reaches-the-sealed-effect-row.md`, in this repository's
-  favour)."
-  #{:abort})
+  favour).
+
+  `:state` is the pure ability state (kotoba-lang `lang/state-ability.edn`,
+  slice 1): a function that performs get/put, answered by a handler written
+  in the language and lowered by the frontend to state passing, carries it.
+  It is a TYPE, not an authority -- there is no host behind it -- and it must
+  reach the sealed row for the same reason `:abort` must: a specialization
+  that performs state and one that does not have different interfaces (the
+  state pair against a plain value), so they must not share an identity."
+  #{:abort :state})
 
 (defn- bridgeable-member? [member]
   (or (wire-call? member) (contains? control-effects member)))
