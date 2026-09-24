@@ -1,5 +1,5 @@
 (ns kotoba.test-hir
-  (:require [clojure.set :as set]))
+  (:require [kotoba.lang.coll :as set]))
 
 (defn module
   "Complete a focused test HIR with the canonical checked-module envelope."

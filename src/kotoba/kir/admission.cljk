@@ -1,6 +1,6 @@
 (ns kotoba.kir.admission
   {:kotoba/export [check]}
-  (:require [clojure.set :as set]
+  (:require [kotoba.lang.coll :as set]
             [kotoba.security.abac :as abac]
             [kotoba.security.crypto-policy :as crypto]
             [kotoba.security.hardware :as hardware]
