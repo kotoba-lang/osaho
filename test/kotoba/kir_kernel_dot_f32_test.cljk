@@ -290,7 +290,7 @@
     (let [data (trapped #(kir/execute dot 'main
                                       [image-base 40 (+ image-base 40) 40 10]
                                       {:memory (two-regions av av) :fuel 4}))]
-      (is (= :fuel-exhausted (:trap data))))))
+      (is (= :budget/fuel (:trap data))))))
 
 ;; ---------------------------------------------------------------------------
 ;; `lower` must not start an oracle it cannot finish

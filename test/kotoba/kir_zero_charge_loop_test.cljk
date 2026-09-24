@@ -53,4 +53,4 @@
       (ir/execute kir 'main [] {:fuel 3})
       (is false "expected fuel trap")
       (catch clojure.lang.ExceptionInfo e
-        (is (= :fuel-exhausted (:trap (ex-data e))))))))
+        (is (= :budget/fuel (:trap (ex-data e))))))))

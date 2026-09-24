@@ -19,6 +19,7 @@
             [kotoba.kir-f64-boundary-test]
             ;; P2 of adr-2609242100: boundary-only validation, budgets, frames
             [kotoba.kir-boundary-validation-test]
+            [kotoba.kir-budgets-test]
             ;; aggregate ABI v8: recursive / generic ADT handles on native
             [kotoba.kir-native-recursive-adt-test]
             [kotoba.kir-alpha-normalization-test]
@@ -83,6 +84,7 @@
 (t/run-tests 'kotoba.kir-test
              'kotoba.kir-f64-boundary-test
              'kotoba.kir-boundary-validation-test
+             'kotoba.kir-budgets-test
              'kotoba.kir-native-recursive-adt-test
    'kotoba.kir-alpha-normalization-test
              'kotoba.kir-cljs-i64-ashr-test

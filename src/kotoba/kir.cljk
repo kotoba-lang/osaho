@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* budget-traps default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -65,7 +65,7 @@
   "Largest admitted execution budget: 2^53-1, where both counters are exact."
   9007199254740991)
 
-;; The initial budget of the run in progress, so a `:fuel-exhausted` trap can
+;; The initial budget of the run in progress, so a `:budget/fuel` trap can
 ;; name the budget that was actually exhausted. It used to report
 ;; `{:limit default-fuel}` unconditionally -- 512 -- for every run, including
 ;; the ones the aiueos objects make at 250,000,000, so the one field in the
@@ -105,7 +105,20 @@
 ;; interpreted call, and a host that runs out first traps
 ;; `:host/stack-exhausted` -- a different name, because it is the host's
 ;; limit and not the program's budget. `execute` takes `:frames`.
-(def default-frames 10000)
+;;
+;; 32, not 10,000 (P4, 2026-09-24). 10,000 was never reachable on the host
+;; this interpreter actually runs on: under nbb/SCI every interpreted call is
+;; dozens of host frames. Measured, fresh process per depth, non-tail
+;; `(+ 1 (depth (- n 1)))`: on the kbb default stack depth 8 completes and 12
+;; is `:host/stack-exhausted`; on `--stack-size=4096` (what bin/amu and the
+;; corpus runner give the compiler) 48 completes and 64 does not, and with a
+;; three-binding `let` in the body 32 completes and 48 does not. So with
+;; 10,000 the deterministic budget never fired and the host's
+;; nondeterministic limit always did. 32 makes `:budget/frames` the answer on
+;; the compiler's host for those shapes; on a smaller stack (kbb's default)
+;; the host still runs out first, and says so by its own name. A caller that
+;; has the stack raises it per run with `:frames`.
+(def default-frames 32)
 (def max-frames
   "Largest admitted frames budget (same ceiling as fuel: an exact JS Number)."
   9007199254740991)
@@ -1394,10 +1407,66 @@
                  (str/includes? message "too much recursion")))))
 
 (defn- trap! [reason data]
-  (throw (ex-info (name reason) (merge {:phase :ir :trap reason} data))))
+  ;; The message is the trap's FULL name: `(name :budget/fuel)` is "fuel",
+  ;; which says nothing about whose limit it was (P4, adr-2609242100).
+  (throw (ex-info (if (namespace reason) (str (namespace reason) "/" (name reason)) (name reason))
+                  (merge {:phase :ir :trap reason} data))))
+
+;; P4 of adr-2609242100: the four resource budgets of a run, one unit each,
+;; named traps, set per run by the embedder (`execute` :fuel :cells :bytes
+;; :frames). Their defaults are kotoba-lang lang/limits.edn :profile/reference.
+;;
+;;   fuel    function entries                         :budget/fuel
+;;   cells   heap nodes the run allocates: a pair,    :budget/cells
+;;           a kgraph datom, a constructed aggregate
+;;           (variant, record, option/result, list,
+;;           set, map, vector node). Charged at
+;;           construction, so a shared value is
+;;           counted once. A vector is ONE cell here
+;;           whatever its length (its items are
+;;           bounded per vector by :language/value
+;;           :vector-items); native counts vector
+;;           items in a second arena.
+;;   bytes   UTF-8 bytes of the strings the run       :budget/bytes
+;;           produces (concat, substring, replace,
+;;           case folds), cumulative
+;;   frames  interpreter call depth                   :budget/frames
+;;
+;; cells and bytes default to nil -- not metered -- because this host never
+;; bounded aggregate nodes or string bytes before P4 and a new default would
+;; stop programs that ran. The two physical arenas the interpreter has always
+;; had (pairs, kgraph datoms, 4096 each) remain, and exhausting one is now
+;; also `:budget/cells` (with `:arena`), not `:heap-exhausted` /
+;; `:kgraph-exhausted`.
+(def budget-traps #{:budget/fuel :budget/cells :budget/bytes :budget/frames})
+
+(defn- charge-cells! [heap n op]
+  (when-let [cells (:cells-budget heap)]
+    (let [remaining (vswap! cells - n)]
+      (when (neg? remaining)
+        (trap! :budget/cells {:limit (:cells-limit heap) :op op})))))
+
+(defn- charge-bytes! [heap text op]
+  (when-let [bytes (:bytes-budget heap)]
+    (let [remaining (vswap! bytes - (value/utf8-byte-count! text))]
+      (when (neg? remaining)
+        (trap! :budget/bytes {:limit (:bytes-limit heap) :op op}))))
+  text)
+
+;; The KIR heads that construct an aggregate node, each charged one cell.
+(def ^:private cell-constructor-ops
+  '#{pair kgraph-assert! map-new map-assoc option-some result-ok result-err
+     result-ok-of result-err-of variant-new option-some-of option-none-of
+     hetero-vector-new hetero-vector-assoc typed-list-new typed-set-new
+     typed-set-conj typed-set-disj typed-map-new typed-map-assoc typed-map-dissoc
+     record-new record-assoc vector-new vector-conj vector-assoc vector-assoc!
+     vector-alloc vector-drop vector-take vector-f64-new vector-f64-conj
+     vector-f64-assoc vector-f64-drop vector-f64-take string-index-new
+     string-index-assoc disjoint-set-i64-new disjoint-set-i64-union
+     document-vector document-list document-set document-map})
 
 (defn- charge!
-  "Decrement fuel. Optional `context` map is merged into :fuel-exhausted traps
+  "Decrement fuel. Optional `context` map is merged into :budget/fuel traps
   (T3.3: :function + :call-stack tip for source mapping)."
   ([fuel] (charge! fuel nil))
   ([fuel context]
@@ -1407,7 +1476,7 @@
    ;; touched.
    (let [remaining (vswap! fuel dec)]
      (when (neg? remaining)
-       (trap! :fuel-exhausted
+       (trap! :budget/fuel
               (merge {:limit (or *fuel-limit* default-fuel)}
                      (when (map? context) context)))))))
 
@@ -3558,7 +3627,7 @@
   (let [{:keys [cells capacity]} heap
         index (count @cells)]
     (when (>= index capacity)
-      (trap! :heap-exhausted {:capacity capacity}))
+      (trap! :budget/cells {:arena :pairs :capacity capacity}))
     (vswap! cells conj [left right])
     ;; The returned handle re-enters the value stream as an ordinary
     ;; `.kotoba` i64 value (e.g. it may later be compared, or passed to
@@ -3593,7 +3662,7 @@
 (defn- assert-datom! [heap e a v]
   (let [{:keys [datoms kgraph-capacity]} heap]
     (when (>= (count @datoms) kgraph-capacity)
-      (trap! :kgraph-exhausted {:capacity kgraph-capacity}))
+      (trap! :budget/cells {:arena :kgraph :capacity kgraph-capacity}))
     (vswap! datoms conj [e a v])
     #?(:clj 1 :cljs i64/one)))
 
@@ -3715,6 +3784,7 @@
                      (trap! :unbound-symbol {:symbol form}))
     :else
     (let [[op & args] form]
+      (when (contains? cell-constructor-ops op) (charge-cells! heap 1 op))
       (cond
         ;; `let` body and `if` branch are tail positions -- rebind and loop,
         ;; never call back into this function. See the docstring.
@@ -3906,12 +3976,12 @@
 
         (= op 'string-concat)
         (let [[left right] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
-          (value/bounded-string! (str left right) value/string-value-byte-limit))
+          (charge-bytes! heap (value/bounded-string! (str left right) value/string-value-byte-limit) op))
 
         (= op 'string-substring)
         (let [[input start end]
               (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
-          (value/utf8-substring! input start end))
+          (charge-bytes! heap (value/utf8-substring! input start end) op))
 
         (= op 'string-code-point-at)
         (let [[input offset]
@@ -3923,8 +3993,8 @@
         (let [[input needle replacement]
               (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
           (when (empty? needle) (trap! :empty-string-replacement-needle {}))
-          (value/bounded-string! (str/replace input needle replacement)
-                                 value/string-value-byte-limit))
+          (charge-bytes! heap (value/bounded-string! (str/replace input needle replacement)
+                                                     value/string-value-byte-limit) op))
 
         (= op 'string-contains?)
         (let [[haystack needle]
@@ -3972,14 +4042,16 @@
             #?(:clj (long n) :cljs (i64/->bigint n))))
 
         (= op 'string-fold-case)
-        (value/bounded-string!
-         (value/fold-case! (eval-expr (first args) env functions fuel heap call-stack cap-call))
-         value/string-value-byte-limit)
+        (charge-bytes! heap
+         (value/bounded-string!
+          (value/fold-case! (eval-expr (first args) env functions fuel heap call-stack cap-call))
+          value/string-value-byte-limit) op)
 
         (= op 'string-upper)
-        (value/bounded-string!
-         (value/upper-case! (eval-expr (first args) env functions fuel heap call-stack cap-call))
-         value/string-value-byte-limit)
+        (charge-bytes! heap
+         (value/bounded-string!
+          (value/upper-case! (eval-expr (first args) env functions fuel heap call-stack cap-call))
+          value/string-value-byte-limit) op)
 
         (= op 'keyword-from-string)
         (let [text (value/bounded-string!
@@ -5398,7 +5470,7 @@
   oracle whose writes are invisible is worth nothing."
   ([kir function-name args] (execute kir function-name args {}))
   ([kir function-name args {:keys [fuel cap-call typed-cap-call pair-capacity kgraph-capacity
-                                   memory frames boundary-budget]
+                                   memory frames boundary-budget cells bytes]
                             :or {fuel default-fuel pair-capacity default-pair-capacity
                                  kgraph-capacity default-kgraph-capacity
                                  frames default-frames}}]
@@ -5428,6 +5500,11 @@
      (throw (ex-info "frames must be a positive integer within the admitted ceiling"
                      {:phase :ir :reason :frames-outside-admitted-range
                       :frames frames :maximum max-frames})))
+   (doseq [[k v] [[:cells cells] [:bytes bytes]]]
+     (when-not (or (nil? v) (and (integer? v) (pos? v) (<= v max-fuel)))
+       (throw (ex-info (str (name k) " must be a positive integer within the admitted ceiling")
+                       {:phase :ir :reason (keyword (str (name k) "-outside-admitted-range"))
+                        k v :maximum max-fuel}))))
    (when-not (and (integer? pair-capacity) (<= 0 pair-capacity default-pair-capacity))
      (throw (ex-info "pair capacity is outside runtime limits"
                      {:phase :ir :pair-capacity pair-capacity})))
@@ -5490,7 +5567,7 @@
              (budget-trap-or-rethrow! error {:argument declared-type})
              (throw error))))))
      (let [invoke #(binding [*runtime-schemas* (:schemas kir)
-                             ;; fuel64: so a :fuel-exhausted trap names the
+                             ;; fuel64: so a :budget/fuel trap names the
                              ;; budget this run actually had.
                              *fuel-limit* fuel
                              *frames-limit* frames
@@ -5504,6 +5581,10 @@
                                     functions
                                     (volatile! fuel) {:cells (volatile! []) :capacity pair-capacity
                                                       :datoms (volatile! []) :kgraph-capacity kgraph-capacity
+                                                      :cells-budget (when cells (volatile! cells))
+                                                      :cells-limit cells
+                                                      :bytes-budget (when bytes (volatile! bytes))
+                                                      :bytes-limit bytes
                                                       :memory memory-image}
                                     [] cap-dispatch))
            ;; Box a `:bool` result at the boundary, the way every other target
@@ -5564,6 +5645,24 @@
            (if (host-stack-exhausted? e)
              (trap! :host/stack-exhausted {:frames-limit frames})
              (throw e))))))))
+
+(defn oracle-inconclusive-trap
+  "The resource trap that stopped an oracle run, or nil when E is anything
+  else. A resource trap is a `:budget/*` (fuel, cells, bytes, frames) or
+  `:host/stack-exhausted`: the run was stopped, not answered, so a caller
+  comparing its value with a target's must report `oracle inconclusive`,
+  distinct from a mismatch and from a pass (adr-2609242100 section 4).
+  Looks down the cause chain: SCI wraps a throw in an error whose own ex-data
+  has no `:trap`."
+  [e]
+  (loop [x e]
+    (when x
+      (let [trap (:trap (ex-data x))]
+        (cond
+          (contains? budget-traps trap) trap
+          (= :host/stack-exhausted trap) trap
+          (some? trap) nil
+          :else (recur #?(:clj (.getCause ^Throwable x) :cljs (.-cause x))))))))
 
 (defn lower
   "Lower HIR to runtime KIR, sealing a pure entry's oracle value.
@@ -5726,11 +5825,24 @@
         ;; export wrapper, the restricted-ESM emitter and this interpreter all
         ;; hand back one. Sealing the boxed value keeps
         ;; `kotoba.verifier`'s own re-execution comparable to it directly.
-        value (when (and (:entry hir) (contains? #{:i64 :bool} (:result hir))
-                         (empty? (:effects hir)) (not kernel-native?))
-                (execute base (:entry hir) []
-                         {:fuel (or (:oracle-fuel opts) default-oracle-fuel)}))]
-    (assoc base
+        ;; P4 (adr-2609242100 section 4): a run of the oracle that stops on a
+        ;; RESOURCE -- a `:budget/*` trap or `:host/stack-exhausted` -- has
+        ;; not answered, and that is neither a value nor a refusal of the
+        ;; program. It is recorded as `:oracle-inconclusive <trap>` and
+        ;; `:oracle-value` stays nil; every other trap still aborts `lower`.
+        oracle (when (and (:entry hir) (contains? #{:i64 :bool} (:result hir))
+                          (empty? (:effects hir)) (not kernel-native?))
+                 (try
+                   {:value (execute base (:entry hir) []
+                                    (cond-> {:fuel (or (:oracle-fuel opts) default-oracle-fuel)}
+                                      (:oracle-frames opts) (assoc :frames (:oracle-frames opts))))}
+                   (catch #?(:clj Throwable :cljs :default) e
+                     (if-let [trap (oracle-inconclusive-trap e)]
+                       {:inconclusive trap}
+                       (throw e)))))
+        value (:value oracle)]
+    (assoc (cond-> base
+             (:inconclusive oracle) (assoc :oracle-inconclusive (:inconclusive oracle)))
            :oracle-value value
            ;; `:blocks` is the INTERNAL representation and keeps the 0/1 word,
            ;; which is what `:const.i64` can carry and what every target uses
