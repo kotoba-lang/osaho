@@ -28,7 +28,7 @@
   just as well if `unwrap` were `identity` and the defect did not exist."
   (:require [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
-            [clojure.edn :as edn]
+            [kotoba.lang.edn :as edn]
             [clojure.walk :as walk]
             [cbor.core :as cbor]
             [ipld.value :as value]

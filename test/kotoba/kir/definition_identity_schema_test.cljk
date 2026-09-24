@@ -43,7 +43,7 @@
             [clojure.java.io :as io]
             [ipld.schema :as schema]
             [ipld.schema-dsl :as dsl]
-            [clojure.edn :as edn]
+            [kotoba.lang.edn :as edn]
             [kotoba.kir.definition-identity :as identity]))
 
 (def ^:private schema-source
