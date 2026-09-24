@@ -12,7 +12,7 @@
      body -- it must not launder an operand the slice cannot emit.
   3. A self-call INSIDE the scope is not a tail call: the leave follows it,
      so the loop-helper walker must report it as non-tail."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

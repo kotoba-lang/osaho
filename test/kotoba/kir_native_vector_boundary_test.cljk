@@ -1,5 +1,5 @@
 (ns kotoba.kir-native-vector-boundary-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
 (defn- hir [vector-type exported-helper?]

@@ -13,7 +13,7 @@
   would have refused it the way it refuses `[:banana :u8]`, by absence, and a
   caller reporting that refusal would print a paragraph about typed values
   that never mentions the slice. So the refusal is written down."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
 (defn- module [params body]

@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-progressive-stream-test
   "Progressive live push on open chunk-queue streams — ADR 0126."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir.value :as value]))
 
 (deftest open-stream-pending-then-enqueue-then-close

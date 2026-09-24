@@ -10,7 +10,7 @@
   The consequence was that the identical operation was gated when written
   directly and admitted when bound by a `let`, which is how `xorshift32`
   reached a native backend while the `u32-wrap` it desugars into was rejected."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))
 

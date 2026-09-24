@@ -7,7 +7,7 @@
   a `CHAR16 *`. `bytes-literal-length` does NOT refuse, and that asymmetry is
   the decision this file exists to hold still -- the length is a property of
   the literal text and refusing something answerable buys nothing."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as kir]))
 

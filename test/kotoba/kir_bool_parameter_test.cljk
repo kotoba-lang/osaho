@@ -16,7 +16,7 @@
   So these tests do the thing ADR 0219 asked for and would not assume: they
   EXECUTE a `:bool` parameter, in every position one can occupy, before the
   admission gate is allowed to admit one."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))
 

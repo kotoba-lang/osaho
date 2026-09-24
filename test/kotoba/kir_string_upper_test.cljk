@@ -2,7 +2,7 @@
   "string-upper KIR eval: execute proves the op works at the KIR level, with
   the bounded-string! wrapper and the same host-locale determinism rules as
   string-fold-case (Locale/ROOT on the JVM)."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as ir]))
 
 (def upper-kir

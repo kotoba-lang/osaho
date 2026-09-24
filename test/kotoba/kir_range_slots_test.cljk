@@ -2,7 +2,7 @@
   "The ABI v10 range heads at the KIR level -- `string-find-byte`,
   `string-append-range` -- pinned as reference semantics in UTF-8 byte
   coordinates on both hosts."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

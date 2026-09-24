@@ -1,7 +1,7 @@
 (ns kotoba.kir-value-task-stream-test
   "First-slice tests for host [:task [:stream :bytes]] / [:stream :bytes]
   (ADR 0121 — get-stream dual-runtime unblock)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest stream-and-task-types-are-admitted

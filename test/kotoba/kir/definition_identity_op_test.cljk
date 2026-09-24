@@ -7,7 +7,7 @@
   compiler's own function map was accepted, and its KIR keeps bodies as source
   forms rather than IR nodes, so the mistake was available rather than
   hypothetical."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.definition-identity :as di]))
 
 (def ^:private base

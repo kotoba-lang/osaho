@@ -1,6 +1,6 @@
 (ns kotoba.kir-guest-task-ops-test
   "Guest-language task poll/read ops (ADR 0127) via KIR execute."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as kir]
             [kotoba.kir.value :as value]))
 

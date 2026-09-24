@@ -18,7 +18,7 @@
   `non-string-typed-ops`, because `only-cljs-provider-typed-features?` shares
   that set and has no lowering for either operation -- exactly the arrangement
   `i32-operations` and the `vector-*` families already use."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
 (defn- hir [body]

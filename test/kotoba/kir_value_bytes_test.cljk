@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-bytes-test
   "First-slice tests for runtime `:bytes` (ADR 0120 / W5 get-stream unblock)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest bytes-value-predicates-and-bounds

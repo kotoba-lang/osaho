@@ -31,7 +31,7 @@
                               yields INT64_MIN, AArch64 saturates, this
                               interpreter traps."
   (:require [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]
             [kotoba.kir.value :as value]
             [kotoba.test-hir :as test-hir]))

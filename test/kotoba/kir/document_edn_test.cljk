@@ -1,5 +1,5 @@
 (ns kotoba.kir.document-edn-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (def document

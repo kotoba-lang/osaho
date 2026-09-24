@@ -34,7 +34,7 @@
     the existing traversal, not the thing itself.
   - Not per-node identity. The two CIDs in play are the two DEFINITION CIDs.
     That is the point being made, not a limitation being apologised for."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [cbor.core :as cbor]
             [ipld.link :as link]
             [ipld.selector :as selector]

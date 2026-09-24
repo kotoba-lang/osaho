@@ -1,7 +1,7 @@
 (ns kotoba.kir-definition-identity-test
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [cbor.core :as cbor]
             [kotoba.kir.definition-identity :as identity]))
 

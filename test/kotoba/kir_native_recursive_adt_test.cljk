@@ -7,7 +7,7 @@
   way a type names itself. The positives are shapes the gate refused before
   v8; the negatives pin that exports, handle equality and undeclared or
   out-of-range references stay refused, each for its own reason."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
 (def node

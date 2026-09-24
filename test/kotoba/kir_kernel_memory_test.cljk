@@ -5,7 +5,7 @@
   `kotoba.native.aarch64`, not about what a memory model ought to do. Where
   the backends admit something surprising this suite pins the surprise --
   see `four-byte-index-wraps-below-the-buffer`."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))
 

@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-chunk-queue-test
   "True multi-chunk producer stream (chunk-queue) — ADR 0125."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir.value :as value]))
 
 (deftest chunk-queue-yields-one-producer-chunk-per-read

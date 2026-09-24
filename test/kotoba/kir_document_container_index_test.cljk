@@ -22,7 +22,7 @@
   Both directions are asserted here: the in-range read returns its item, and
   the out-of-range one still refuses -- in the language's own vocabulary,
   never as a host error object."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

@@ -18,7 +18,7 @@
   `kir-oracle-fuel-test` next door is about the trampoline that lets a 10,000
   iteration loop fold INSIDE the fixed budget. This one is about the budget
   itself."
-  (:require #?(:clj  [clojure.test :refer [deftest is]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is]]
                :cljs [cljs.test :refer [deftest is] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

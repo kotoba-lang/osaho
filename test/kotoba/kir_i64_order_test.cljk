@@ -20,7 +20,7 @@
   wasm lowering rather than as a comparator. What identifies it is that ONE
   entry compiled (a one-element sort never calls the comparator) and that
   `:bool`, `:string` and `:keyword` keys compiled at every entry count."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir.value :as value]))
 

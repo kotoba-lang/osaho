@@ -1,5 +1,5 @@
 (ns kotoba.kir-closure-param-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))
 

@@ -50,7 +50,7 @@
 
   A migration that changed only the tag alphabet would still move every CID
   through dimensions 2 and 3."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [cbor.core :as cbor]

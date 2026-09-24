@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-resource-table-test
   "Linear resource table for task/stream handles — ADR 0133."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest construction-registers-live-handles

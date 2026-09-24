@@ -7,7 +7,7 @@
   not running -- and it is not the literal pool's, whose name says `rodata`
   and would tell a caller that read-only data is unavailable when what they
   asked for was writable memory or the address of code."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))

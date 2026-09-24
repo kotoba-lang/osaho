@@ -17,7 +17,7 @@
   So this asserts the INVARIANT and not the limit: whatever runs out first,
   what comes out is `:fuel-exhausted` with `:phase :ir`, and never a host
   error object."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))
