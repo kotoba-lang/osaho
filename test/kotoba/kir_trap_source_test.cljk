@@ -20,7 +20,11 @@
 
 (deftest fuel-exhausted-cites-function-and-call-stack
   (try
-    (kir/execute (deep-loop-kir) 'main [])
+    ;; fuel 3, not the default 512: `spin` is not a self-tail loop helper, so
+    ;; the interpreter nests, and on nbb the host stack runs out within about
+    ;; ten interpreted calls -- which since P2 of adr-2609242100 is its own
+    ;; trap, :host/stack-exhausted, and no longer passes for fuel.
+    (kir/execute (deep-loop-kir) 'main [] {:fuel 3})
     (is false "expected fuel trap")
     (catch clojure.lang.ExceptionInfo e
       (let [d (ex-data e)]

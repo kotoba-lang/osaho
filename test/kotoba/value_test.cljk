@@ -1,5 +1,5 @@
 (ns kotoba.value-test
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest exact-utf8-count-and-malformed-unicode-rejection
@@ -135,38 +135,39 @@
       (is (thrown? clojure.lang.ExceptionInfo
                    (value/bounded-typed-value! type invalid))))))
 
-(deftest canonical-indirect-bytes-are-bounded-across-list-items
+(deftest boundary-payload-bytes-are-one-budget-across-list-items
+  ;; P2 of adr-2609242100: the old aggregate indirect-byte limit (1 MiB) is
+  ;; now the boundary walk's byte budget, with its own trap name.
   (let [type [:list :string]
         leaf (apply str (repeat value/string-value-byte-limit "a"))
         at-limit [type (vec (repeat 16 leaf))]
         over-limit [type (vec (repeat 17 leaf))]]
-    (is (= value/canonical-indirect-byte-limit
+    (is (= value/boundary-traversal-byte-limit
            (* 16 value/string-value-byte-limit)))
     (is (= at-limit (value/bounded-typed-value! type at-limit)))
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"aggregate indirect byte limit"
-         (value/bounded-typed-value! type over-limit)))))
+    (let [refusal (try (value/bounded-typed-value! type over-limit) nil
+                       (catch #?(:clj Exception :cljs :default) e (ex-data e)))]
+      (is (= :budget/boundary-bytes (:trap refusal)))
+      (is (= value/boundary-traversal-byte-limit (:limit refusal))))
+    (testing "a contract may name its own byte budget"
+      (is (= :budget/boundary-bytes
+             (:trap (try (value/bounded-typed-value! type [type [leaf]] {:bytes 10}) nil
+                         (catch #?(:clj Exception :cljs :default) e (ex-data e)))))))))
 
-(deftest nested-lists-share-one-aggregate-item-budget
+(deftest nested-lists-share-one-boundary-node-budget
+  ;; Every node of the value is charged to one traversal budget, however the
+  ;; lists nest: the outer list, the inner list and each item.
   (let [inner [:list :i64]
         outer [:list inner]
-        at-limit [outer [[inner (vec (repeat 16383 0))]]]
-        over-limit [outer [[inner (vec (repeat 16384 0))]]]
-        validate
-        (fn [typed-value]
-          ;; This arity exposes the shared validation state. Offset the
-          ;; independent ADT-node counter so this test isolates cardinality.
-          (value/bounded-typed-value!
-           outer typed-value 0 (volatile! -20000)
-           (volatile! 0) (volatile! 0)))]
-    (is (= value/canonical-list-total-item-limit
-           value/canonical-list-item-limit))
-    (is (= at-limit (validate at-limit)))
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"aggregate list item limit"
-         (validate over-limit)))))
+        zero #?(:clj 0 :cljs (js/BigInt 0))
+        value [outer [[inner (vec (repeat 100 zero))] [inner (vec (repeat 100 zero))]]]
+        nodes (+ 1 2 200)
+        refusal (fn [budget]
+                  (try (value/bounded-typed-value! outer value {:nodes budget}) nil
+                       (catch #?(:clj Exception :cljs :default) e (ex-data e))))]
+    (is (= value (value/bounded-typed-value! outer value {:nodes nodes})))
+    (is (= :budget/boundary-nodes (:trap (refusal (dec nodes)))))
+    (is (= (dec nodes) (:limit (refusal (dec nodes)))))))
 
 (deftest typed-set-values-are-unique-canonically-ordered-and-bounded
   (let [type [:set :i64]

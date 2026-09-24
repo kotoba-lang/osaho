@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -97,6 +97,19 @@
   construction rather than by both happening to fit in this constant."
   100000)
 (def ^:private default-pair-capacity 4096)
+;; `frames`: the reference interpreter's call-depth budget (P2 of superproject
+;; adr-2609242100-kotoba-safety-is-language-resource-is-target-profile;
+;; kotoba-lang lang/limits.edn :profile/reference :frames). Deterministic:
+;; exceeding it is `:budget/frames` on every host. It is NOT a promise that
+;; the host has that much stack: the interpreter spends host stack per
+;; interpreted call, and a host that runs out first traps
+;; `:host/stack-exhausted` -- a different name, because it is the host's
+;; limit and not the program's budget. `execute` takes `:frames`.
+(def default-frames 10000)
+(def max-frames
+  "Largest admitted frames budget (same ceiling as fuel: an exact JS Number)."
+  9007199254740991)
+(def ^:private ^:dynamic *frames-limit* nil)
 (def ^:private default-kgraph-capacity 4096)
 (def ^:dynamic *runtime-schemas* nil)
 
@@ -1610,10 +1623,46 @@
     (+ (+ kernel (* exponent 0.6931471805599453))
        (* exponent 2.3190468138462996e-17))))
 
-(defn- validate-runtime-value! [runtime-value type position]
+;; P2 of adr-2609242100-kotoba-safety-is-language-resource-is-target-profile:
+;; a value is validated in full ONCE, where it crosses a trust boundary
+;; (`execute` arguments, capability results). `*boundary-budget*` is that
+;; walk's traversal budget ({:nodes n :bytes b}, nil = the defaults in
+;; kotoba.kir.value); `execute` binds it from its `:boundary-budget` option.
+(def ^:private ^:dynamic *boundary-budget* nil)
+
+(defn- budget-trap-or-rethrow!
+  "A boundary walk that ran out of budget is its own named trap
+  (`:budget/boundary-nodes`, `:budget/boundary-bytes`), never folded into an
+  `:invalid-*-value`."
+  [error position]
+  (let [data (ex-data error)]
+    (when (and (keyword? (:trap data)) (= "budget" (namespace (:trap data))))
+      (trap! (:trap data) (merge (select-keys data [:used :limit])
+                                 (when position {:position position}))))))
+
+(declare validate-boundary-value!)
+
+(defn- validate-runtime-value!
+  "The O(1) check for a value that stays INSIDE a type-checked program (an
+  internal call's parameters and result): the value carries its declared
+  tag. It never walks the value -- the frontend and kotoba-verifier already
+  typed it, and every constructor checked its own node."
+  [runtime-value type position]
+  (if (and (vector? type) (= :ref (first type)) (= 2 (count type)))
+    (if (contains? *runtime-schemas* (second type))
+      (when-not (value/operand-tag? type runtime-value)
+        (trap! :value-type-mismatch {:expected type :position position}))
+      (trap! :unknown-schema-reference {:schema (second type) :position position}))
+    (case type
+      :bool (validate-boundary-value! runtime-value type position)
+      (when-not (value/operand-tag? type runtime-value)
+        (trap! :value-type-mismatch {:expected type :position position}))))
+  runtime-value)
+
+(defn- validate-boundary-value! [runtime-value type position]
   (if (and (vector? type) (= :ref (first type)) (= 2 (count type)))
     (if-let [descriptor (get *runtime-schemas* (second type))]
-      (validate-runtime-value! runtime-value descriptor position)
+      (validate-boundary-value! runtime-value descriptor position)
       (trap! :unknown-schema-reference {:schema (second type) :position position}))
     (case type
     :i64
@@ -1717,8 +1766,9 @@
                {:position position :message (ex-message error)})))
 
     (try
-      (value/bounded-typed-value! type runtime-value)
+      (value/bounded-typed-value! type runtime-value *boundary-budget*)
       (catch #?(:clj Exception :cljs :default) error
+        (budget-trap-or-rethrow! error position)
         (trap! :invalid-parametric-value
                {:type type :position position :message (ex-message error)})))))
   runtime-value)
@@ -3472,6 +3522,13 @@
                                     {:function fname :parameter parameter})))
       ;; Charge once on first entry; loop-helper self-tail re-entries are free (T7.1).
       (let [stack' (conj stack fname)]
+        ;; `frames`: interpreter call depth, a deterministic budget (P2 of
+        ;; adr-2609242100). A trampolined self-tail re-entry keeps the stack
+        ;; and so costs no frame.
+        (when (> (count stack') (or *frames-limit* default-frames))
+          (trap! :budget/frames {:limit (or *frames-limit* default-frames)
+                                 :function fname
+                                 :call-stack (vec (take-last 8 stack'))}))
         (when charge?
           (charge! fuel {:function fname
                          :call-stack (vec (take-last 8 stack'))
@@ -3747,9 +3804,11 @@
           (let [request (eval-expr request-form env functions fuel heap call-stack cap-call)]
             (validate-runtime-value! request request-type
                                      {:capability cap-id :boundary :request})
-            (validate-runtime-value! (cap-call cap-id request-type result-type request)
-                                     result-type
-                                     {:capability cap-id :boundary :result})))
+            ;; A host result crosses the trust boundary: validated in full,
+            ;; once, against the boundary budget.
+            (validate-boundary-value! (cap-call cap-id request-type result-type request)
+                                      result-type
+                                      {:capability cap-id :boundary :result})))
 
         (= op 'pair)
         (let [[left right] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
@@ -4195,30 +4254,30 @@
         (contains? '#{result-ok-of result-err-of} op)
         (let [[type payload-form] args
               tag (= op 'result-ok-of)]
-          (value/bounded-typed-value!
+          (value/shallow-typed-value!
            type [tag (eval-expr payload-form env functions fuel heap call-stack cap-call)]))
 
         (= op 'result-ok?-of)
         (let [[type result-form] args
-              result (value/bounded-typed-value!
+              result (value/shallow-typed-value!
                       type (eval-expr result-form env functions fuel heap call-stack cap-call))]
           (true? (first result)))
 
         (contains? '#{result-value-of result-error-of} op)
         (let [[type result-form fallback-form] args
-              result (value/bounded-typed-value!
+              result (value/shallow-typed-value!
                       type (eval-expr result-form env functions fuel heap call-stack cap-call))
               selected? (if (= op 'result-value-of) (first result) (not (first result)))
               payload-type (if (= op 'result-value-of) (second type) (nth type 2))]
           (if selected?
             (second result)
-            (value/bounded-typed-value!
+            (value/shallow-typed-value!
              payload-type
              (eval-expr fallback-form env functions fuel heap call-stack cap-call))))
 
         (= op 'result-match-of)
         (let [[type result-form ok-name ok-body err-name err-body] args
-              result (value/bounded-typed-value!
+              result (value/shallow-typed-value!
                       type (eval-expr result-form env functions fuel heap call-stack cap-call))]
           (if (first result)
             (eval-expr ok-body (assoc env ok-name (second result))
@@ -4228,12 +4287,12 @@
 
         (= op 'variant-new)
         (let [[type tag payload-form] args]
-          (value/bounded-typed-value!
+          (value/shallow-typed-value!
            type [type tag (eval-expr payload-form env functions fuel heap call-stack cap-call)]))
 
         (= op 'variant-match)
         (let [[type value-form branches] args
-              variant (value/bounded-typed-value!
+              variant (value/shallow-typed-value!
                        type (eval-expr value-form env functions fuel heap call-stack cap-call))
               tag (second variant)
               [_ binder body] (some #(when (= tag (first %)) %) branches)]
@@ -4243,32 +4302,32 @@
 
         (= op 'option-some-of)
         (let [[type payload-form] args]
-          (value/bounded-typed-value!
+          (value/shallow-typed-value!
            type [type true (eval-expr payload-form env functions fuel heap call-stack cap-call)]))
 
         (= op 'option-none-of)
         (let [[type] args]
-          (value/bounded-typed-value! type [type false]))
+          (value/shallow-typed-value! type [type false]))
 
         (= op 'option-some?-of)
         (let [[type option-form] args
-              option (value/bounded-typed-value!
+              option (value/shallow-typed-value!
                       type (eval-expr option-form env functions fuel heap call-stack cap-call))]
           (true? (second option)))
 
         (= op 'option-value-of)
         (let [[type option-form fallback-form] args
-              option (value/bounded-typed-value!
+              option (value/shallow-typed-value!
                       type (eval-expr option-form env functions fuel heap call-stack cap-call))]
           (if (true? (second option))
             (nth option 2)
-            (value/bounded-typed-value!
+            (value/shallow-typed-value!
              (second type)
              (eval-expr fallback-form env functions fuel heap call-stack cap-call))))
 
         (= op 'option-match)
         (let [[type option-form none-body some-name some-body] args
-              option (value/bounded-typed-value!
+              option (value/shallow-typed-value!
                       type (eval-expr option-form env functions fuel heap call-stack cap-call))]
           (if (true? (second option))
             (eval-expr some-body (assoc env some-name (nth option 2))
@@ -4279,13 +4338,13 @@
         (let [[type & item-forms] args
               items (mapv #(eval-expr % env functions fuel heap call-stack cap-call)
                           item-forms)]
-          (value/bounded-typed-value! type (into [type] items)))
+          (value/shallow-typed-value! type (into [type] items)))
 
         (= op 'typed-list-new)
         (let [[type & item-forms] args
               items (mapv #(eval-expr % env functions fuel heap call-stack cap-call)
                           item-forms)]
-          (value/bounded-typed-value! type [type items]))
+          (value/shallow-typed-value! type [type items]))
 
         ;; `[:list T]` had a constructor and one reader, and only one.
         ;;
@@ -4307,42 +4366,42 @@
         ;; is a value no program can read an element out of.
         (= op 'typed-list-nth)
         (let [[type value-form index-form] args
-              list-value (value/bounded-typed-value!
+              list-value (value/shallow-typed-value!
                           type (eval-expr value-form env functions fuel heap call-stack cap-call))
               raw-index (eval-expr index-form env functions fuel heap call-stack cap-call)
               index #?(:clj (long raw-index) :cljs (js/Number raw-index))
               items (second list-value)]
           (when (or (neg? index) (>= index (count items)))
             (trap! :list-index-out-of-bounds {:index index :count (count items)}))
-          (value/bounded-typed-value! (second type) (nth items index)))
+          (value/shallow-typed-value! (second type) (nth items index)))
 
         (= op 'hetero-vector-count)
         (let [[type value-form] args
-              items (value/bounded-typed-value!
+              items (value/shallow-typed-value!
                      type (eval-expr value-form env functions fuel heap call-stack cap-call))]
           #?(:clj (long (dec (count items)))
              :cljs (i64/->bigint (dec (count items)))))
 
         (= op 'hetero-vector-at)
         (let [[type value-form index] args
-              items (value/bounded-typed-value!
+              items (value/shallow-typed-value!
                      type (eval-expr value-form env functions fuel heap call-stack cap-call))
               host-index #?(:clj (long index) :cljs (js/Number index))]
           (nth items (inc host-index)))
 
         (= op 'hetero-vector-assoc)
         (let [[type value-form index item-form] args
-              items (value/bounded-typed-value!
+              items (value/shallow-typed-value!
                      type (eval-expr value-form env functions fuel heap call-stack cap-call))
               item (eval-expr item-form env functions fuel heap call-stack cap-call)
               host-index #?(:clj (long index) :cljs (js/Number index))]
-          (value/bounded-typed-value! type (assoc items (inc host-index) item)))
+          (value/shallow-typed-value! type (assoc items (inc host-index) item)))
 
         (= op 'hetero-vector-equal)
         (let [[type left-form right-form] args
-              left (value/bounded-typed-value!
+              left (value/shallow-typed-value!
                     type (eval-expr left-form env functions fuel heap call-stack cap-call))
-              right (value/bounded-typed-value!
+              right (value/shallow-typed-value!
                      type (eval-expr right-form env functions fuel heap call-stack cap-call))]
           #?(:clj (if (= left right) 1 0)
              :cljs (if (= left right) i64/one i64/zero)))
@@ -4351,20 +4410,20 @@
         (let [[type & item-forms] args
               items (mapv #(eval-expr % env functions fuel heap call-stack cap-call)
                           item-forms)]
-          (value/bounded-typed-value! type [type items]))
+          (value/shallow-typed-value! type [type items]))
 
         (= op 'typed-set-count)
         (let [[type value-form] args
-              set-value (value/bounded-typed-value!
+              set-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))]
           #?(:clj (long (count (second set-value)))
              :cljs (i64/->bigint (count (second set-value)))))
 
         (= op 'typed-set-contains)
         (let [[type value-form item-form] args
-              set-value (value/bounded-typed-value!
+              set-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     (second type)
                     (eval-expr item-form env functions fuel heap call-stack cap-call))]
           (boolean (some #(zero? (value/compare-typed-values (second type) % item))
@@ -4372,9 +4431,9 @@
 
         (= op 'typed-set-conj)
         (let [[type value-form item-form] args
-              set-value (value/bounded-typed-value!
+              set-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     (second type)
                     (eval-expr item-form env functions fuel heap call-stack cap-call))]
           (if (some #(zero? (value/compare-typed-values (second type) % item))
@@ -4382,60 +4441,60 @@
             set-value
             (do (when (>= (count (second set-value)) value/typed-set-item-limit)
                   (trap! :set-too-large {:limit value/typed-set-item-limit}))
-                (value/bounded-typed-value!
+                (value/shallow-typed-value!
                  type [type (conj (second set-value) item)]))))
 
         (= op 'typed-set-disj)
         (let [[type value-form item-form] args
-              set-value (value/bounded-typed-value!
+              set-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     (second type)
                     (eval-expr item-form env functions fuel heap call-stack cap-call))]
-          (value/bounded-typed-value!
+          (value/shallow-typed-value!
            type [type (filterv #(not (zero? (value/compare-typed-values
                                              (second type) % item)))
                                (second set-value))]))
 
         (= op 'typed-set-equal)
         (let [[type left-form right-form] args
-              left (value/bounded-typed-value!
+              left (value/shallow-typed-value!
                     type (eval-expr left-form env functions fuel heap call-stack cap-call))
-              right (value/bounded-typed-value!
+              right (value/shallow-typed-value!
                      type (eval-expr right-form env functions fuel heap call-stack cap-call))]
           #?(:clj (if (= left right) 1 0)
              :cljs (if (= left right) i64/one i64/zero)))
 
         (= op 'typed-set-nth)
         (let [[type value-form index-form] args
-              set-value (value/bounded-typed-value!
+              set-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
               raw-index (eval-expr index-form env functions fuel heap call-stack cap-call)
               index #?(:clj (long raw-index) :cljs (js/Number raw-index))
               items (second set-value)]
           (when (or (neg? index) (>= index (count items)))
             (trap! :set-index-out-of-bounds {:index index :count (count items)}))
-          (value/bounded-typed-value! (second type) (nth items index)))
+          (value/shallow-typed-value! (second type) (nth items index)))
 
         (= op 'typed-map-new)
         (let [[type & entry-forms] args
               evaluated (mapv #(eval-expr % env functions fuel heap call-stack cap-call)
                               entry-forms)
               entries (mapv vec (partition 2 evaluated))]
-          (value/bounded-typed-value! type [type entries]))
+          (value/shallow-typed-value! type [type entries]))
 
         (= op 'typed-map-count)
         (let [[type value-form] args
-              map-value (value/bounded-typed-value!
+              map-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))]
           #?(:clj (long (count (second map-value)))
              :cljs (i64/->bigint (count (second map-value)))))
 
         (contains? '#{typed-map-contains typed-map-get typed-map-dissoc} op)
         (let [[type value-form key-form] args
-              map-value (value/bounded-typed-value!
+              map-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
-              key (value/bounded-typed-value!
+              key (value/shallow-typed-value!
                    (second type)
                    (eval-expr key-form env functions fuel heap call-stack cap-call))
               match (some (fn [[candidate item]]
@@ -4449,7 +4508,7 @@
                             (if match [option-type true (second match)]
                                 [option-type false]))
             typed-map-dissoc
-            (value/bounded-typed-value!
+            (value/shallow-typed-value!
              type [type (filterv (fn [[candidate _]]
                                    (not (zero? (value/compare-typed-values
                                                 (second type) candidate key))))
@@ -4457,7 +4516,7 @@
 
         (= op 'typed-map-entry-at)
         (let [[type value-form index-form] args
-              map-value (value/bounded-typed-value!
+              map-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
               raw-index (eval-expr index-form env functions fuel heap call-stack cap-call)
               index #?(:clj (long raw-index) :cljs (js/Number raw-index))
@@ -4484,21 +4543,21 @@
         ;; them back up.
         (contains? '#{typed-map-keys typed-map-vals} op)
         (let [[type value-form] args
-              map-value (value/bounded-typed-value!
+              map-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
               item-type (if (= op 'typed-map-keys) (second type) (nth type 2))
               projection [:list item-type]
               items (mapv (if (= op 'typed-map-keys) first second)
                           (second map-value))]
-          (value/bounded-typed-value! projection [projection items]))
+          (value/shallow-typed-value! projection [projection items]))
 
         (= op 'typed-map-assoc)
         (let [[type value-form key-form item-form] args
-              map-value (value/bounded-typed-value!
+              map-value (value/shallow-typed-value!
                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
-              key (value/bounded-typed-value!
+              key (value/shallow-typed-value!
                    (second type) (eval-expr key-form env functions fuel heap call-stack cap-call))
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     (nth type 2) (eval-expr item-form env functions fuel heap call-stack cap-call))
               remaining (filterv (fn [[candidate _]]
                                    (not (zero? (value/compare-typed-values
@@ -4507,13 +4566,13 @@
           (when (and (= (count remaining) (count (second map-value)))
                      (>= (count remaining) value/typed-map-entry-limit))
             (trap! :map-too-large {:limit value/typed-map-entry-limit}))
-          (value/bounded-typed-value! type [type (conj remaining [key item])]))
+          (value/shallow-typed-value! type [type (conj remaining [key item])]))
 
         (= op 'typed-map-equal)
         (let [[type left-form right-form] args
-              left (value/bounded-typed-value!
+              left (value/shallow-typed-value!
                     type (eval-expr left-form env functions fuel heap call-stack cap-call))
-              right (value/bounded-typed-value!
+              right (value/shallow-typed-value!
                      type (eval-expr right-form env functions fuel heap call-stack cap-call))]
           #?(:clj (if (= left right) 1 0)
              :cljs (if (= left right) i64/one i64/zero)))
@@ -4522,11 +4581,11 @@
         (let [[type & value-forms] args
               values (mapv #(eval-expr % env functions fuel heap call-stack cap-call)
                            value-forms)]
-          (value/bounded-typed-value! type (into [type] values)))
+          (value/shallow-typed-value! type (into [type] values)))
 
         (= op 'record-get)
         (let [[type value-form field] args
-              record-value (value/bounded-typed-value!
+              record-value (value/shallow-typed-value!
                             type (eval-expr value-form env functions fuel heap call-stack cap-call))
               field-index (first (keep-indexed (fn [index [declared-field _]]
                                                  (when (= declared-field field) index))
@@ -4536,21 +4595,21 @@
 
         (= op 'record-assoc)
         (let [[type value-form field replacement-form] args
-              record-value (value/bounded-typed-value!
+              record-value (value/shallow-typed-value!
                             type (eval-expr value-form env functions fuel heap call-stack cap-call))
               replacement (eval-expr replacement-form env functions fuel heap call-stack cap-call)
               field-index (first (keep-indexed (fn [index [declared-field _]]
                                                  (when (= declared-field field) index))
                                                (nth type 2)))]
           (when (nil? field-index) (trap! :unknown-record-field {:field field}))
-          (value/bounded-typed-value! type
+          (value/shallow-typed-value! type
                                       (assoc record-value (inc field-index) replacement)))
 
         (= op 'record-equal)
         (let [[type left-form right-form] args
-              left (value/bounded-typed-value!
+              left (value/shallow-typed-value!
                     type (eval-expr left-form env functions fuel heap call-stack cap-call))
-              right (value/bounded-typed-value!
+              right (value/shallow-typed-value!
                      type (eval-expr right-form env functions fuel heap call-stack cap-call))]
           #?(:clj (if (= left right) 1 0)
              :cljs (if (= left right) i64/one i64/zero)))
@@ -4563,7 +4622,7 @@
         (let [value (eval-expr (first args) env functions fuel heap call-stack cap-call)
               items (if (and (vector? value) (= 2 (count value))
                              (vector? (first value)) (= :list (ffirst value)))
-                      (second (value/bounded-typed-value! (first value) value))
+                      (second (value/shallow-typed-value! (first value) value))
                       (value/bounded-vector-i64! value))]
           #?(:clj (long (count items)) :cljs (i64/->bigint (count items))))
 
@@ -4688,7 +4747,7 @@
           (if (and #?(:clj (integer? index) :cljs (i64/bigint-value? index))
                    (not (neg? index)) (< index (count items)))
             (nth items #?(:clj index :cljs (js/Number index)))
-            (value/bounded-typed-value!
+            (value/shallow-typed-value!
              :f64 (eval-expr fallback-form env functions fuel heap call-stack cap-call))))
 
         (= op 'vector-f64-at)
@@ -4733,7 +4792,7 @@
               items (value/bounded-vector-f64!
                      (eval-expr items-form env functions fuel heap call-stack cap-call))
               index (eval-expr index-form env functions fuel heap call-stack cap-call)
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     :f64 (eval-expr item-form env functions fuel heap call-stack cap-call))]
           (when-not (and #?(:clj (integer? index) :cljs (i64/bigint-value? index))
                          (not (neg? index)) (< index (count items)))
@@ -4745,7 +4804,7 @@
         (let [[items-form item-form] args
               items (value/bounded-vector-f64!
                      (eval-expr items-form env functions fuel heap call-stack cap-call))
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     :f64 (eval-expr item-form env functions fuel heap call-stack cap-call))]
           (when (>= (count items) value/vector-item-limit)
             (trap! :vector-f64-too-large {:limit value/vector-item-limit}))
@@ -4762,7 +4821,7 @@
         (let [[index-form key-form] args
               index (value/bounded-string-index!
                      (eval-expr index-form env functions fuel heap call-stack cap-call))
-              key (value/bounded-typed-value!
+              key (value/shallow-typed-value!
                    :string (eval-expr key-form env functions fuel heap call-stack cap-call))
               found (some (fn [[candidate item]] (when (= candidate key) item)) index)]
           (if (= op 'string-index-contains)
@@ -4773,9 +4832,9 @@
         (let [[index-form key-form item-form] args
               index (value/bounded-string-index!
                      (eval-expr index-form env functions fuel heap call-stack cap-call))
-              key (value/bounded-typed-value!
+              key (value/shallow-typed-value!
                    :string (eval-expr key-form env functions fuel heap call-stack cap-call))
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     :i64 (eval-expr item-form env functions fuel heap call-stack cap-call))
               without-key (filterv #(not= key (first %)) index)]
           (when (and (= (count without-key) (count index))
@@ -4837,7 +4896,7 @@
         (let [type (case op document-bool :bool document-i64 :i64 document-f64 :f64
                          document-string :string document-keyword :keyword document-symbol :symbol)
               tag (name type)
-              item (value/bounded-typed-value!
+              item (value/shallow-typed-value!
                     type (eval-expr (first args) env functions fuel heap call-stack cap-call))]
           (value/bounded-document! [tag item]))
 
@@ -4865,7 +4924,7 @@
         (let [entries (mapv (fn [[key-form item-form]]
                               [(let [key (eval-expr key-form env functions fuel heap call-stack cap-call)]
                                  (if (keyword? key)
-                                   ["keyword" (value/bounded-typed-value! :keyword key)]
+                                   ["keyword" (value/shallow-typed-value! :keyword key)]
                                    (value/bounded-document! key)))
                                (value/bounded-document!
                                 (eval-expr item-form env functions fuel heap call-stack cap-call))])
@@ -4901,19 +4960,19 @@
                          {:tag tag}))]
           (case op
             document-vector-at
-            (let [index (value/bounded-typed-value!
+            (let [index (value/shallow-typed-value!
                          :i64 (eval-expr index-or-item-form env functions fuel heap call-stack cap-call))]
               (if (and (not (neg? index)) (< index (count items)))
                 [[:option :document] true (nth items (container-host-index index))]
                 [[:option :document] false]))
             document-list-at
-            (let [index (value/bounded-typed-value!
+            (let [index (value/shallow-typed-value!
                          :i64 (eval-expr index-or-item-form env functions fuel heap call-stack cap-call))]
               (if (and (not (neg? index)) (< index (count items)))
                 [[:option :document] true (nth items (container-host-index index))]
                 [[:option :document] false]))
             document-vector-assoc
-            (let [index (value/bounded-typed-value!
+            (let [index (value/shallow-typed-value!
                          :i64 (eval-expr index-or-item-form env functions fuel heap call-stack cap-call))
                   item (value/bounded-document!
                         (eval-expr item-form env functions fuel heap call-stack cap-call))]
@@ -4928,7 +4987,7 @@
                 (trap! :document-vector-too-large {:limit value/document-container-item-limit}))
               (value/bounded-document! ["vector" (conj items item)]))
             document-vector-drop
-            (let [drop-count (value/bounded-typed-value!
+            (let [drop-count (value/shallow-typed-value!
                               :i64 (eval-expr index-or-item-form env functions fuel heap call-stack cap-call))]
               (when-not (and (not (neg? drop-count)) (<= drop-count (count items)))
                 (trap! :document-vector-drop-out-of-range
@@ -4936,7 +4995,7 @@
               (value/bounded-document!
                ["vector" (subvec items (container-host-index drop-count))]))
             document-vector-remove
-            (let [index (value/bounded-typed-value!
+            (let [index (value/shallow-typed-value!
                          :i64 (eval-expr index-or-item-form env functions fuel heap call-stack cap-call))]
               (when-not (and (not (neg? index)) (< index (count items)))
                 (trap! :document-vector-index-out-of-range {:index index :count (count items)}))
@@ -4958,7 +5017,7 @@
         (let [[tag entries]
               (value/bounded-document!
                (eval-expr (first args) env functions fuel heap call-stack cap-call))
-              index (value/bounded-typed-value!
+              index (value/shallow-typed-value!
                      :i64 (eval-expr (second args) env functions fuel heap call-stack cap-call))]
           (when-not (= "map" tag) (trap! :document-map-required {:tag tag}))
           (if (and (not (neg? index)) (< index (count entries)))
@@ -5011,7 +5070,7 @@
               _ (when-not (= "map" tag) (trap! :document-map-required {:tag tag}))
               raw-key (eval-expr key-form env functions fuel heap call-stack cap-call)
               key (if (keyword? raw-key)
-                    ["keyword" (value/bounded-typed-value! :keyword raw-key)]
+                    ["keyword" (value/shallow-typed-value! :keyword raw-key)]
                     (value/bounded-document! raw-key))
               position (first (keep-indexed #(when (zero? (value/document-map-key-compare key (first %2))) %1)
                                             entries))]
@@ -5339,9 +5398,10 @@
   oracle whose writes are invisible is worth nothing."
   ([kir function-name args] (execute kir function-name args {}))
   ([kir function-name args {:keys [fuel cap-call typed-cap-call pair-capacity kgraph-capacity
-                                   memory]
+                                   memory frames boundary-budget]
                             :or {fuel default-fuel pair-capacity default-pair-capacity
-                                 kgraph-capacity default-kgraph-capacity}}]
+                                 kgraph-capacity default-kgraph-capacity
+                                 frames default-frames}}]
    (when (and (contains? kir :exports)
               (not (some #{function-name} (:exports kir))))
      (throw (ex-info "function is not exported" {:phase :ir :function function-name})))
@@ -5364,6 +5424,10 @@
      (throw (ex-info "fuel must be a positive integer within the admitted ceiling"
                      {:phase :ir :reason :fuel-outside-admitted-range
                       :fuel fuel :maximum max-fuel})))
+   (when-not (and (integer? frames) (pos? frames) (<= frames max-frames))
+     (throw (ex-info "frames must be a positive integer within the admitted ceiling"
+                     {:phase :ir :reason :frames-outside-admitted-range
+                      :frames frames :maximum max-frames})))
    (when-not (and (integer? pair-capacity) (<= 0 pair-capacity default-pair-capacity))
      (throw (ex-info "pair capacity is outside runtime limits"
                      {:phase :ir :pair-capacity pair-capacity})))
@@ -5418,11 +5482,19 @@
          :string-index (value/bounded-string-index! arg)
          :disjoint-set-i64 (value/bounded-disjoint-set-i64! arg)
          :document (value/bounded-document! arg)
-         (value/bounded-typed-value! type arg))))
+         ;; The entry call is a trust boundary: the one place an argument is
+         ;; walked in full (iteratively, against the traversal budget).
+         (try
+           (value/bounded-typed-value! type arg boundary-budget)
+           (catch #?(:clj Exception :cljs :default) error
+             (budget-trap-or-rethrow! error {:argument declared-type})
+             (throw error))))))
      (let [invoke #(binding [*runtime-schemas* (:schemas kir)
                              ;; fuel64: so a :fuel-exhausted trap names the
                              ;; budget this run actually had.
-                             *fuel-limit* fuel]
+                             *fuel-limit* fuel
+                             *frames-limit* frames
+                             *boundary-budget* boundary-budget]
                      (invoke-function function
                                     (mapv (fn [arg type]
                                             (if (= type :i64)
@@ -5483,8 +5555,14 @@
          ;; throw and both re-throw what is not host stack exhaustion, which
          ;; `kir_host_stack_trap_test` pins from both directions.
          (catch #?(:clj Throwable :cljs :default) e
+           ;; Its own name since P2 (adr-2609242100): running out of HOST
+           ;; stack is not running out of fuel. It used to be reported as
+           ;; `:fuel-exhausted` with `:host-stack-exhausted true`, so a caller
+           ;; reading the trap was told the program's budget was spent when
+           ;; the host's was. The deterministic bound on call depth is
+           ;; `:budget/frames`; this one is whatever the host has.
            (if (host-stack-exhausted? e)
-             (trap! :fuel-exhausted {:limit fuel :host-stack-exhausted true})
+             (trap! :host/stack-exhausted {:frames-limit frames})
              (throw e))))))))
 
 (defn lower
