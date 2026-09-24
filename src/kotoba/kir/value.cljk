@@ -1,5 +1,5 @@
 (ns kotoba.kir.value
-  {:kotoba/export [utf8-find-byte! utf8-append-range! utf8-index-of-from! utf8-compare-lines! utf8-compare! fold-ascii! utf8-find-blank! utf8-skip-blank! adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! shallow-typed-value! operand-tag? boundary-traversal-node-limit boundary-traversal-byte-limit bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit]}
+  {:kotoba/export [utf8-invalid-traps utf8-invalid-at utf8-decode-canonical bytes-item-out-of-range-at bytes-from-items bytes-items bytes-slice-of utf8-find-byte! utf8-append-range! utf8-index-of-from! utf8-compare-lines! utf8-compare! fold-ascii! utf8-find-blank! utf8-skip-blank! adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! shallow-typed-value! operand-tag? boundary-traversal-node-limit boundary-traversal-byte-limit bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit]}
   (:require [kotoba.lang.text :as str]
             #?@(:cljs [[sha2.core :as sha2]
                        [kotoba.kir.cljs-i64 :as i64]]))
@@ -375,6 +375,133 @@
        (throw (ex-info "bytes value exceeds byte limit"
                        {:phase :value :bytes n :limit limit})))
      value)))
+
+;; --- bytes as a guest value; the string constructor (2026-09-25) ------------
+;;
+;; Superproject adr-2609242330 (amu selfhost): Kotoba had no operation that
+;; builds a string from bytes or code points, and no way to build a non-empty
+;; `:bytes` value at all, so a pure CBOR/UTF-8 library could read text but never
+;; produce it. `:bytes` is the language's byte string -- a distinct type from
+;; `:vector-i64` in every checker (a CBOR byte string and an array of small ints
+;; are different values) -- and these are its reference semantics:
+;;
+;;   (bytes-from-vector-i64 v)  every item in [0,255], at most
+;;                              `bytes-value-byte-limit` items
+;;   (vector-i64-from-bytes b)  the bytes as i64 items
+;;   (string-from-utf8 b)       canonical UTF-8 (RFC 3629) only; every other
+;;                              byte sequence is REFUSED with a named trap,
+;;                              never replaced with U+FFFD
+;;
+;; The classification is one function so every backend can be compared with
+;; it: the ESM prelude and the native loader implement the same walk and name
+;; the same first failure.
+
+(def utf8-invalid-traps
+  "Every trap `string-from-utf8` names for bytes that are not canonical UTF-8,
+  in the order `utf8-invalid-at` tests them at a sequence start."
+  [:utf8/unexpected-continuation :utf8/overlong :utf8/invalid-byte
+   :utf8/truncated :utf8/bad-continuation :utf8/surrogate :utf8/above-max])
+
+(defn- host-byte-at [b i]
+  #?(:clj (bit-and (aget ^bytes b (int i)) 0xff)
+     :cljs (aget b i)))
+
+(defn utf8-invalid-at
+  "nil when the host `:bytes` value B is canonical UTF-8, else `[trap offset]`
+  for the FIRST sequence that is not, where TRAP is one of
+  `utf8-invalid-traps` and OFFSET the byte it was decided at. At a sequence
+  start with lead byte L:
+
+    L in 80..BF                    :utf8/unexpected-continuation
+    L = C0 / C1                    :utf8/overlong  (only overlong 2-byte forms)
+    L in F5..FF                    :utf8/invalid-byte
+    the input ends before byte 2   :utf8/truncated
+    byte 2 is not 10xxxxxx         :utf8/bad-continuation
+    E0 with byte 2 < A0            :utf8/overlong
+    F0 with byte 2 < 90            :utf8/overlong
+    ED with byte 2 >= A0           :utf8/surrogate  (U+D800..U+DFFF)
+    F4 with byte 2 >= 90           :utf8/above-max  (above U+10FFFF)
+    a later byte missing / not 10xxxxxx  :utf8/truncated / :utf8/bad-continuation
+
+  Deciding the second byte's range before looking for the rest is what makes
+  `E0 80` an overlong form rather than a truncated one -- the classification
+  is total and deterministic, which is what lets three backends be compared on
+  it byte for byte."
+  [b]
+  (let [n (bytes-byte-count b)]
+    (loop [i 0]
+      (if (>= i n)
+        nil
+        (let [b0 (host-byte-at b i)]
+          (cond
+            (< b0 0x80) (recur (inc i))
+            (< b0 0xc0) [:utf8/unexpected-continuation i]
+            (< b0 0xc2) [:utf8/overlong i]
+            (> b0 0xf4) [:utf8/invalid-byte i]
+            (>= (inc i) n) [:utf8/truncated i]
+            :else
+            (let [b1 (host-byte-at b (inc i))
+                  k (cond (< b0 0xe0) 1 (< b0 0xf0) 2 :else 3)]
+              (cond
+                (not= 0x80 (bit-and b1 0xc0)) [:utf8/bad-continuation (inc i)]
+                (and (= b0 0xe0) (< b1 0xa0)) [:utf8/overlong i]
+                (and (= b0 0xf0) (< b1 0x90)) [:utf8/overlong i]
+                (and (= b0 0xed) (>= b1 0xa0)) [:utf8/surrogate i]
+                (and (= b0 0xf4) (>= b1 0x90)) [:utf8/above-max i]
+                :else
+                (let [bad (loop [j 2]
+                            (cond (> j k) nil
+                                  (>= (+ i j) n) [:utf8/truncated i]
+                                  (not= 0x80 (bit-and (host-byte-at b (+ i j)) 0xc0))
+                                  [:utf8/bad-continuation (+ i j)]
+                                  :else (recur (inc j))))]
+                  (if bad bad (recur (+ i k 1))))))))))))
+
+(defn utf8-decode-canonical
+  "The string whose UTF-8 bytes are exactly B. Callers establish
+  `(nil? (utf8-invalid-at b))` first; the host decoder is still asked to fail
+  rather than replace, so a caller that skipped the check gets an error, not
+  a U+FFFD."
+  [b]
+  #?(:clj (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
+                          (.onMalformedInput java.nio.charset.CodingErrorAction/REPORT)
+                          (.onUnmappableCharacter java.nio.charset.CodingErrorAction/REPORT))]
+            (str (.decode decoder (java.nio.ByteBuffer/wrap ^bytes b))))
+     :cljs (.decode (js/TextDecoder. "utf-8" #js {:fatal true}) b)))
+
+(defn bytes-item-out-of-range-at
+  "The index of the first item of the i64 vector ITEMS outside [0,255], or nil."
+  [items]
+  (loop [i 0]
+    (when (< i (count items))
+      (let [item (nth items i)]
+        (if #?(:clj (<= 0 item 255)
+               :cljs (and (<= 0 (js/Number item)) (<= (js/Number item) 255)))
+          (recur (inc i))
+          i)))))
+
+(defn bytes-from-items
+  "A fresh host `:bytes` value holding ITEMS (i64 values already known to be
+  in [0,255])."
+  [items]
+  #?(:clj (byte-array (map unchecked-byte items))
+     :cljs (let [out (js/Uint8Array. (count items))]
+             (dotimes [i (count items)] (aset out i (js/Number (nth items i))))
+             out)))
+
+(defn bytes-items
+  "The bytes of the host `:bytes` value B as a vector of host integers."
+  [b]
+  (let [n (bytes-byte-count b)]
+    (loop [i 0 out (transient [])]
+      (if (< i n) (recur (inc i) (conj! out (host-byte-at b i))) (persistent! out)))))
+
+(defn bytes-slice-of
+  "Bytes [START, END) of B as a fresh host value (bounds established by the
+  caller)."
+  [b start end]
+  #?(:clj (java.util.Arrays/copyOfRange ^bytes b (int start) (int end))
+     :cljs (.slice b start end)))
 
 (defn utf8-string->bytes
   "Construct a host `:bytes` value from a UTF-8 string. Fixture/test helper
