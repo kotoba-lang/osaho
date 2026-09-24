@@ -84,12 +84,35 @@
         (conj out byte)
         (recur remaining (conj out (bit-or byte 0x80)))))))
 
+(defn- utf8-code-point
+  "OUT with the UTF-8 encoding of the scalar value CP appended."
+  [out cp]
+  (cond
+    (< cp 0x80) (conj out cp)
+    (< cp 0x800) (conj out (+ 0xC0 (quot cp 64)) (+ 0x80 (bit-and cp 0x3F)))
+    (< cp 0x10000) (conj out (+ 0xE0 (quot cp 4096))
+                         (+ 0x80 (bit-and (quot cp 64) 0x3F))
+                         (+ 0x80 (bit-and cp 0x3F)))
+    :else (conj out (+ 0xF0 (quot cp 262144))
+                (+ 0x80 (bit-and (quot cp 4096) 0x3F))
+                (+ 0x80 (bit-and (quot cp 64) 0x3F))
+                (+ 0x80 (bit-and cp 0x3F)))))
+
 (defn utf8 [text]
   #?(:clj (mapv #(bit-and (int %) 0xff) (.getBytes ^String text "UTF-8"))
      :cljs (vec (js/Array.from (.encode (js/TextEncoder.) text)))
-     ;; Kotoba: the :cljs form, refused by name by the compiler (host
-     ;; TextEncoder) -- a #?-only body read as nothing (adr-2609111900).
-     :default (vec (js/Array.from (.encode (js/TextEncoder.) text)))))
+     ;; Kotoba (adr-2609242330 S1): a Kotoba string is UTF-8 already, so the
+     ;; bytes are its code points re-encoded, read at byte offsets. It cannot
+     ;; hold a lone surrogate, so TextEncoder's U+FFFD substitution has no
+     ;; counterpart to match. Was a copy of the :cljs TextEncoder form, which
+     ;; the compiler refused by name.
+     :default (let [n (string-byte-length text)]
+                (loop [i 0 out []]
+                  (if (< i n)
+                    (let [cp (string-code-point-at text i)]
+                      (recur (+ i (cond (< cp 0x80) 1 (< cp 0x800) 2 (< cp 0x10000) 3 :else 4))
+                             (utf8-code-point out cp)))
+                    out)))))
 
 (defn text-bytes [text]
   (let [bytes (utf8 text)]
