@@ -70,7 +70,11 @@
                (js/Number n)
                (throw (ex-info "uleb operand is not exactly representable"
                                {:phase :descriptor :operand (str n)})))
-             n)))
+             n)
+     ;; Kotoba: an i64 is already the integer bit operations take. Without a
+     ;; :default clause the Kotoba reader (features #{:kotoba}) read this body
+     ;; as nothing -- "function body is empty" (adr-2609111900).
+     :default n))
 
 (defn uleb [n]
   (loop [n (host-integer n) out []]
@@ -82,7 +86,10 @@
 
 (defn utf8 [text]
   #?(:clj (mapv #(bit-and (int %) 0xff) (.getBytes ^String text "UTF-8"))
-     :cljs (vec (js/Array.from (.encode (js/TextEncoder.) text)))))
+     :cljs (vec (js/Array.from (.encode (js/TextEncoder.) text)))
+     ;; Kotoba: the :cljs form, refused by name by the compiler (host
+     ;; TextEncoder) -- a #?-only body read as nothing (adr-2609111900).
+     :default (vec (js/Array.from (.encode (js/TextEncoder.) text)))))
 
 (defn text-bytes [text]
   (let [bytes (utf8 text)]
