@@ -17,6 +17,8 @@
             ;; all four closed by porting this single file.
             [kotoba.kir-test]
             [kotoba.kir-f64-boundary-test]
+            ;; aggregate ABI v8: recursive / generic ADT handles on native
+            [kotoba.kir-native-recursive-adt-test]
             [kotoba.kir-alpha-normalization-test]
             [kotoba.kir-cljs-i64-ashr-test]
             ;; the six collection primitives the friendly heads had nothing to
@@ -78,6 +80,7 @@
 
 (t/run-tests 'kotoba.kir-test
              'kotoba.kir-f64-boundary-test
+             'kotoba.kir-native-recursive-adt-test
    'kotoba.kir-alpha-normalization-test
              'kotoba.kir-cljs-i64-ashr-test
              'kotoba.kir-collection-primitive-test
