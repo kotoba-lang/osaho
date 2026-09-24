@@ -50,7 +50,7 @@
 
   A migration that changed only the tag alphabet would still move every CID
   through dimensions 2 and 3."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [kotoba.lang.edn :as edn]
             [cbor.core :as cbor]
@@ -185,9 +185,9 @@
           "the value model does have a float; the wrapper simply never reaches it")
       (is (not= (hex (cbor/encode naive)) (hex (cbor/encode native)))
           "so the two are different blocks for one value")
-      (is (clojure.string/includes?
+      (is (kotoba.lang.text/includes?
            (hex (cbor/encode naive))
-           (hex (.getBytes "kotoba.lang.code-identity/f64" "UTF-8")))
+           (hex (kbytes/utf8-bytes "kotoba.lang.code-identity/f64")))
           "and the wrapper keyword is inside the block a DefCID would address")))
 
   (testing "an i64 outside the exactly-representable range"

@@ -26,10 +26,10 @@
   The same payload is encoded BOTH ways in every case, and the assertions are
   about the difference. A test that only encoded the unwrapped form would pass
   just as well if `unwrap` were `identity` and the defect did not exist."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [kotoba.lang.edn :as edn]
-            [clojure.walk :as walk]
+            [kotoba.lang.coll :as walk]
             [cbor.core :as cbor]
             [ipld.value :as value]
             [kotoba.value.codec :as codec]
@@ -88,7 +88,7 @@
 (defn- bytes-of [x] (hex (cbor/encode (form x))))
 
 (def ^:private wrapper-keyword-hex
-  (hex (.getBytes "kotoba.lang.code-identity" "UTF-8")))
+  (hex (kbytes/utf8-bytes "kotoba.lang.code-identity")))
 
 (def ^:private vectors
   (-> "kotoba/kir/fixtures/code-identity-vectors.edn"
@@ -102,12 +102,12 @@
   (let [wrapped (identity/f64 1.5)]
     (testing "before"
       (is (= value/code-map (first (form wrapped))))
-      (is (clojure.string/includes? (bytes-of wrapped) wrapper-keyword-hex)
+      (is (kotoba.lang.text/includes? (bytes-of wrapped) wrapper-keyword-hex)
           "the wrapper keyword is in the block"))
     (testing "after"
       (let [u (unwrap wrapped)]
         (is (= value/code-float (first (form u))))
-        (is (not (clojure.string/includes? (bytes-of u) wrapper-keyword-hex))
+        (is (not (kotoba.lang.text/includes? (bytes-of u) wrapper-keyword-hex))
             "and it is gone")
         (is (= 1.5 (value/float64-value (value/form->value (form u))))
             "carrying the value it always meant")))))
@@ -116,11 +116,11 @@
   (let [wrapped (identity/i64 9223372036854775807)]
     (testing "before"
       (is (= value/code-map (first (form wrapped))))
-      (is (clojure.string/includes? (bytes-of wrapped) wrapper-keyword-hex)))
+      (is (kotoba.lang.text/includes? (bytes-of wrapped) wrapper-keyword-hex)))
     (testing "after"
       (let [u (unwrap wrapped)]
         (is (= value/code-int64 (first (form u))))
-        (is (not (clojure.string/includes? (bytes-of u) wrapper-keyword-hex)))
+        (is (not (kotoba.lang.text/includes? (bytes-of u) wrapper-keyword-hex)))
         (is (= 9223372036854775807 (value/int64-value (value/form->value (form u))))
             "exactly, which is the whole reason the wrapper existed")))))
 
@@ -144,7 +144,7 @@
         (let [payload (identity/identity-payload definition)
               u (unwrap payload)]
           (is (some? (form u)) (str id ": the unwrapped payload did not convert"))
-          (is (not (clojure.string/includes? (bytes-of u) wrapper-keyword-hex))
+          (is (not (kotoba.lang.text/includes? (bytes-of u) wrapper-keyword-hex))
               (str id ": a wrapper keyword survived into the block"))
           (swap! n inc))))
     (is (= 10 @n))
@@ -161,9 +161,9 @@
                                 :interface {:arity 0 :result :f64}
                                 :dependencies []}
         payload (identity/identity-payload definition)]
-    (is (clojure.string/includes? (bytes-of payload) wrapper-keyword-hex)
+    (is (kotoba.lang.text/includes? (bytes-of payload) wrapper-keyword-hex)
         "this payload does contain a wrapper, so the case can discriminate")
-    (is (not (clojure.string/includes? (bytes-of (unwrap payload)) wrapper-keyword-hex)))
+    (is (not (kotoba.lang.text/includes? (bytes-of (unwrap payload)) wrapper-keyword-hex)))
     (is (not= (bytes-of payload) (bytes-of (unwrap payload)))
         "and the two encodings differ, which is what payload v3 would be buying")))
 
