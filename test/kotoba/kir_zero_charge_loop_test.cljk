@@ -47,7 +47,10 @@
                :effects #{}
                :body (list 'forever 'x)}]}]
     (try
-      (ir/execute kir 'main [] {:fuel 32})
+      ;; fuel 3: a non-helper recursion nests on the host, and on nbb the host
+      ;; stack is spent within about ten calls -- :host/stack-exhausted since
+      ;; P2 of adr-2609242100, no longer reported as fuel.
+      (ir/execute kir 'main [] {:fuel 3})
       (is false "expected fuel trap")
       (catch clojure.lang.ExceptionInfo e
         (is (= :fuel-exhausted (:trap (ex-data e))))))))

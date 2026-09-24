@@ -87,8 +87,13 @@
           (str "a host error escaped the language boundary: "
                (pr-str (:host-error-escaped outcome))))
       (is (= :ir (:phase outcome)))
-      (is (= :fuel-exhausted (:trap outcome))
-          "fuel or host stack, the trap the caller sees is the same one"))))
+      ;; Since P2 of adr-2609242100 the three limits have three names: fuel,
+      ;; the deterministic call-depth budget, and the host's own stack. Which
+      ;; one a million-deep recursion reaches first is the host's business;
+      ;; that it is one of these three, by name, is the invariant.
+      (is (contains? #{:fuel-exhausted :budget/frames :host/stack-exhausted}
+                     (:trap outcome))
+          (str "not a named resource trap: " (pr-str outcome))))))
 
 (deftest a-shallow-program-still-folds
   (testing "the guard did not turn a working oracle into a trap"
@@ -133,7 +138,8 @@
       (is (nil? (:host-error-escaped outcome))
           (str "at depth " depth " a host error escaped: "
                (pr-str (:host-error-escaped outcome))))
-      (is (= :fuel-exhausted (:trap outcome))
+      (is (contains? #{:fuel-exhausted :budget/frames :host/stack-exhausted}
+                     (:trap outcome))
           (str "at depth " depth)))))
 
 (deftest a-real-trap-is-not-swallowed-by-the-host-stack-guard
