@@ -162,9 +162,18 @@
           pure (assoc vector-definition :definition/effect-row
                       (identity/effect-row-from-hir {:effects #{}} {:id->name catalog}))]
       (is (not= (identity/definition-cid aborting) (identity/definition-cid pure)))))
+  (testing "(j2) the pure ability `:state` (lang/state-ability.edn) passes the
+            bridge unchanged, and a definition that performs it has an identity
+            of its own"
+    (is (= #{:state} (identity/effect-row-from-hir {:effects #{:state}} {:id->name catalog})))
+    (let [stateful (assoc vector-definition :definition/effect-row
+                          (identity/effect-row-from-hir {:effects #{:state}} {:id->name catalog}))
+          pure (assoc vector-definition :definition/effect-row #{})]
+      (is (nil? (identity/definition-error stateful)))
+      (is (not= (identity/definition-cid stateful) (identity/definition-cid pure)))))
   (testing "(k) the set is closed: a keyword that is not a control effect is
             still refused as not a wire capability call"
-    (is (= #{:abort} identity/control-effects))
+    (is (= #{:abort :state} identity/control-effects))
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo #"not a wire capability call"
          (identity/effect-row-from-hir {:effects #{:not/a-control-effect}}
