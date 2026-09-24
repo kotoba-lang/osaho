@@ -31,7 +31,7 @@
   NO REAL MODEL BYTES. This host carries no GGUF (measured 2026-09-02), so
   every block below is synthesised by a small generator that makes each field
   differ from its neighbours -- which is what makes a wrong index visible."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]
             [kotoba.kir.iq-codebook :as iq]
             [kotoba.kir.value :as value]))

@@ -1,6 +1,6 @@
 (ns kotoba.kir-string-split-count-test
   "T4.2: string-split-count segment arithmetic."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as ir]))
 
 (defn- run [haystack sep]

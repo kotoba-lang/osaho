@@ -1,6 +1,6 @@
 (ns kotoba.kir-zero-charge-loop-test
   "T7.1: loop-helper self-tail is zero-charge after first entry."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as ir]))
 
 (defn- deep-loop-kir [n]

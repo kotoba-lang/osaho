@@ -1,6 +1,6 @@
 (ns kotoba.kir-trap-source-test
   "T3.3: fuel-exhausted traps cite function + call-stack tip."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as kir]))
 
 (defn- deep-loop-kir

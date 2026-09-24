@@ -26,7 +26,7 @@
   The same payload is encoded BOTH ways in every case, and the assertions are
   about the difference. A test that only encoded the unwrapped form would pass
   just as well if `unwrap` were `identity` and the defect did not exist."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [clojure.walk :as walk]

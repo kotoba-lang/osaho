@@ -20,7 +20,7 @@
   with its own evidence, which is what the paragraph below used to ask for --
   see `the-i64-shift-family-is-admitted-with-its-operand-restriction`.
   `xorshift32` is still refused and nothing here measured it."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
 (defn- typed-hir [body]

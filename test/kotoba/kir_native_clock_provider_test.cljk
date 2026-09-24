@@ -1,5 +1,5 @@
 (ns kotoba.kir-native-clock-provider-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as kir]))
 
 (def request-type

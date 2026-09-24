@@ -12,7 +12,7 @@
   compiled when spelled through bits and was refused when spelled with `:f64`
   parameters. After it, `(defn scale [x :f64] :f64 (f64-mul x 2.5))` lowers to
   `MOVZ X1,#0x4004,LSL#48` (2.5's bit pattern) followed by `FMUL D0,D0,D1`."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
 (defn- hir [functions & {:keys [exports entry]}]

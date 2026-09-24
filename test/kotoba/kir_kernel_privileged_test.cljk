@@ -21,7 +21,7 @@
   MSR and port rows beside it are not decoration: they pin the class it joins,
   so a change that quietly starts ANSWERING one of them fails here rather than
   in a kernel."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))
 

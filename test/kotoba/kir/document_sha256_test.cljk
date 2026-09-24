@@ -1,5 +1,5 @@
 (ns kotoba.kir.document-sha256-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest document-sha256-is-stable-and-content-sensitive

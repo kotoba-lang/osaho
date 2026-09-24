@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-task-fulfill-test
   "Pending→ready fulfill + multi-chunk stream construction (ADR 0123)."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir.value :as value]))
 
 (deftest pending-then-fulfill-then-read

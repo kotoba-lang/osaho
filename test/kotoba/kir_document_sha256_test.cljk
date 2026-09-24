@@ -13,7 +13,7 @@
   `document-canonical-bytes` for the document was written to a file and hashed
   with `shasum -a 256` (2026-08-31). So neither host's own digest is the
   oracle for the other -- both are held to a third answer."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir.value :as value]))
 

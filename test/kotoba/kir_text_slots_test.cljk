@@ -3,7 +3,7 @@
   `string-fold-ascii`, `string-find-blank`, `string-skip-blank` -- pinned
   here as reference semantics, in UTF-8 byte coordinates, on both hosts
   (i64 answers are BigInts on cljs, compared as text)."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

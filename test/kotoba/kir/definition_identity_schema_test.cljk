@@ -39,7 +39,7 @@
   that passes both reports, so `check-block` answers
   `:checked :not-answered` and `the-verdict-refuses-to-answer-checkedness`
   pins that it never says otherwise."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [ipld.schema :as schema]
             [ipld.schema-dsl :as dsl]

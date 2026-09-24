@@ -22,7 +22,7 @@
   6. `keys` and `vals` agree on ORDER, which is the only thing that lets a
      program pair an entry's two halves back up, and `vals` keeps duplicates,
      which is why neither projection is a set."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]))
 

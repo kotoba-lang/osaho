@@ -13,7 +13,7 @@
   which is why `capability-contracts` could throw on ClojureScript for over a
   month with a green suite: the one host where a capability id is a JS BigInt
   was the one host this file never reached."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing]])
             [kotoba.kir.descriptor :as descriptor]))
 

@@ -20,7 +20,7 @@
 
   The positive cases matter as much as the negative ones: a checker that
   refuses everything would also make the leak go away."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

@@ -22,7 +22,7 @@
   Runs on BOTH runtimes on purpose (`.cljc`, listed in `run-tests.cljk`). The
   ceiling exists because of what the counter does on Node, so a JVM-only test
   would be asserting the constraint on the runtime it was not chosen for."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

@@ -22,7 +22,7 @@
   The positive cases are the other half. A checker that refused everything
   would also make the truncation go away, so the sequencing that a `do` inside
   a `let` body must actually perform is executed here, effects and all."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))

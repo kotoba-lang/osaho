@@ -1,6 +1,6 @@
 (ns kotoba.kir-oracle-fuel-test
   "T7.4: loop-helper self-tail trampoline + raised oracle fuel."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.kir :as ir]
             [kotoba.test-hir :as test-hir]))
 

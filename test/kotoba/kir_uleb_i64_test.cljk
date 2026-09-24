@@ -10,7 +10,7 @@
 
   A BigInt too large to convert exactly is refused rather than truncated into
   a shorter LEB128, which would be a silently wrong encoding."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir.descriptor :as descriptor]))
 

@@ -7,7 +7,7 @@
   tempting reason to call that the right answer here. It is not: folding it
   would turn a program's allocation into a compile-time null and every access
   through it into a trap the source never wrote."
-  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing] :include-macros true])
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))
