@@ -50,8 +50,8 @@
 
   A migration that changed only the tag alphabet would still move every CID
   through dimensions 2 and 3."
-  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
-            [clojure.java.io :as io]
+  (:require [kotoba.lang.error :as kerror] [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
+            [kotoba.io :as io]
             [kotoba.lang.edn :as edn]
             [cbor.core :as cbor]
             [ipld.value :as value]
@@ -206,7 +206,7 @@
     (is (= :value/integer-out-of-range
            (try (value/value->form 9223372036854775807)
                 nil
-                (catch clojure.lang.ExceptionInfo e (:problem (ex-data e)))))
+                (catch kerror/ExceptionInfo e (:problem (ex-data e)))))
         "a raw out-of-range integer IS refused, so acceptance above is a fact about the wrapper")))
 
 ;; ---------------------------------------------------------------------------
@@ -252,17 +252,17 @@
       ;; unrelated failure as a demonstration.
       (is (= :definition/unencodable-float
              (:problem (ex-data (try (identity/normalize 1.5)
-                                     (catch clojure.lang.ExceptionInfo e e))))))
+                                     (catch kerror/ExceptionInfo e e))))))
       (is (= :value/unwrapped-number
              (:problem (ex-data (try (value/value->form 1.5)
-                                     (catch clojure.lang.ExceptionInfo e e)))))))
+                                     (catch kerror/ExceptionInfo e e)))))))
     (testing "control -- a value outside BOTH domains is refused by both"
       (is (= :definition/uncanonical-value
              (:problem (ex-data (try (identity/normalize (java.util.Date.))
-                                     (catch clojure.lang.ExceptionInfo e e))))))
+                                     (catch kerror/ExceptionInfo e e))))))
       (is (= :value/unsupported-type
              (:problem (ex-data (try (value/value->form (java.util.Date.))
-                                     (catch clojure.lang.ExceptionInfo e e)))))))))
+                                     (catch kerror/ExceptionInfo e e)))))))))
 
 (deftest normalize-unifies-two-integers-the-codec-splits
   ;; THE finding. `normalize` says so in its own comment -- "(i64 5) and 5

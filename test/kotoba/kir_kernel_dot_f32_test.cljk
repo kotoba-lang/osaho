@@ -91,7 +91,7 @@
 
 (defn- trapped [thunk]
   (try (thunk) nil
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e (ex-data e))))
+       (catch :default e (ex-data e))))
 
 ;; ---------------------------------------------------------------------------
 ;; plumbing: values whose sum is exact, so any tree agrees

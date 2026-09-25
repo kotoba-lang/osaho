@@ -1,6 +1,6 @@
 (ns kotoba.kir-zero-charge-loop-test
   "T7.1: loop-helper self-tail is zero-charge after first entry."
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is]]
             [kotoba.kir :as ir]))
 
 (defn- deep-loop-kir [n]
@@ -52,5 +52,5 @@
       ;; P2 of adr-2609242100, no longer reported as fuel.
       (ir/execute kir 'main [] {:fuel 3})
       (is false "expected fuel trap")
-      (catch clojure.lang.ExceptionInfo e
+      (catch kerror/ExceptionInfo e
         (is (= :budget/fuel (:trap (ex-data e))))))))

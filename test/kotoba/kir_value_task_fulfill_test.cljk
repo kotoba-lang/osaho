@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-task-fulfill-test
   "Pending→ready fulfill + multi-chunk stream construction (ADR 0123)."
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is]]
             [kotoba.kir.value :as value]))
 
 (deftest pending-then-fulfill-then-read
@@ -24,15 +24,15 @@
     (is (= :ready (:state (value/task-poll pending))))
     (is (= :ready (:state (value/task-poll copied))))
     (value/task-drop! pending)
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not live"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"not live"
                           (value/task-poll copied)))))
 
 (deftest fulfill-fails-if-not-pending
   (let [ready (value/make-ready-bytes-task (byte-array [1]))
         cancelled (value/task-cancel! (value/make-pending-bytes-task))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not pending"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"not pending"
                           (value/task-fulfill! ready (byte-array [1]))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not pending"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"not pending"
                           (value/task-fulfill! cancelled (byte-array [1]))))))
 
 (deftest multi-chunk-stream-concat-and-chunked-read
@@ -50,5 +50,5 @@
 
 (deftest multi-chunk-oversize-fails-closed
   (let [huge (byte-array (inc value/bytes-value-byte-limit))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceed"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"exceed"
                           (value/make-bytes-stream-from-chunks [huge])))))

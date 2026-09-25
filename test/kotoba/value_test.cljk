@@ -1,5 +1,5 @@
 (ns kotoba.value-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest exact-utf8-count-and-malformed-unicode-rejection
@@ -7,12 +7,12 @@
   (is (= 6 (value/utf8-byte-count! "言葉")))
   (is (= 4 (value/utf8-byte-count! "😀")))
   (is (= "安全" (value/bounded-string! "安全" 6)))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceeds UTF-8 byte limit"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"exceeds UTF-8 byte limit"
                         (value/bounded-string! "安全" 5)))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unpaired high surrogate"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"unpaired high surrogate"
                         (value/utf8-byte-count!
                          (String. (char-array [(char 0xd800)])))))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unpaired low surrogate"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"unpaired low surrogate"
                         (value/utf8-byte-count!
                          (String. (char-array [(char 0xdc00)]))))))
 
@@ -21,19 +21,19 @@
   (is (= "葉" (value/utf8-substring! "言葉" 3 6)))
   (is (= 0x8a00 (value/utf8-code-point-at! "言葉" 0)))
   (is (= 0x8449 (value/utf8-code-point-at! "言葉" 3)))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"splits a UTF-8 code point"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"splits a UTF-8 code point"
                         (value/utf8-substring! "言葉" 1 3)))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"out of bounds"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"out of bounds"
                         (value/utf8-code-point-at! "言葉" 6))))
 
 (deftest bounded-keyword-and-map-values-are-owned-and-typed
   (is (= :安全/確認 (value/bounded-keyword! :安全/確認 32)))
   (is (= {:a 1 :b 2} (value/bounded-map! {:a 1 :b 2})))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a keyword"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"not a keyword"
                         (value/bounded-keyword! "a" 32)))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a signed i64"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"not a signed i64"
                         (value/bounded-map! {:a "unsafe"})))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceeds entry limit"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"exceeds entry limit"
                         (value/bounded-map!
                          (into {} (map (fn [index] [(keyword (str "k" index)) index])
                                        (range 129)))))))
@@ -42,26 +42,26 @@
   (is (= [false] (value/bounded-option-i64! [false])))
   (is (= [true 7] (value/bounded-option-i64! [true 7])))
   (doseq [invalid [nil 0 false [] [false 1] [true] [true "7"] [nil 7]]]
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (value/bounded-option-i64! invalid)))))
 
 (deftest result-i64-has-two-closed-payload-bearing-variants
   (is (= [true 7] (value/bounded-result-i64! [true 7])))
   (is (= [false -3] (value/bounded-result-i64! [false -3])))
   (doseq [invalid [[true] [false] [true 1 2] [:ok 1] [true "1"] nil]]
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (value/bounded-result-i64! invalid)))))
 
 (deftest parametric-result-types-share-fixed-depth-and-node-budgets
   (let [type [:result :string [:result :i64 :bool]]]
     (is (= [true "安全"] (value/bounded-typed-value! type [true "安全"])))
     (is (= [false [true 7]] (value/bounded-typed-value! type [false [true 7]])))
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (value/bounded-typed-value! type [true 7])))
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (value/bounded-typed-value! type [false [true "7"]]))))
   (let [too-deep (nth (iterate (fn [t] [:result :i64 t]) :bool) 13)]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"depth limit"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"depth limit"
                           (value/validate-value-type! too-deep)))))
 
 (deftest closed-variant-values-carry-their-complete-type-identity
@@ -72,11 +72,11 @@
            (value/bounded-typed-value! type [type :failed "安全"])))
     (doseq [invalid [[[:variant :other/status [[:ready :i64]]] :ready 7]
                      [type :unknown 7] [type :ready "7"] [type :failed 7]]]
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (value/bounded-typed-value! type invalid)))))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"qualified keyword"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"qualified keyword"
                         (value/validate-value-type! [:variant :status [[:ready :i64]]])))
-  (is (thrown? clojure.lang.ExceptionInfo
+  (is (thrown? kerror/ExceptionInfo
                (value/validate-value-type! [:variant :demo/dup [[:same :i64] [:same :bool]]]))))
 
 (deftest generic-option-none-retains-its-complete-type-identity
@@ -96,7 +96,7 @@
                      [string-option true 7]
                      [string-option nil]
                      nil]]
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (value/bounded-typed-value! string-option invalid))))))
 
 (deftest heterogeneous-vector-values-seal-position-types-and-exact-length
@@ -112,9 +112,9 @@
                      [type "7" "安全" true]
                      [[ :vector [:string :string :bool]] 7 "安全" true]
                      nil]]
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (value/bounded-typed-value! type invalid)))))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"heterogeneous vector types"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"heterogeneous vector types"
                         (value/validate-value-type!
                         [:vector (vec (repeat 33 :i64))]))))
 
@@ -132,7 +132,7 @@
     (doseq [invalid [[type (list first-item)]
                      [type [[item-type 7 2]]]
                      [type [first-item] :extra]]]
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (value/bounded-typed-value! type invalid))))))
 
 (deftest boundary-payload-bytes-are-one-budget-across-list-items
@@ -190,7 +190,7 @@
                      [[:set :string] ["1"]]
                      [type [1 "2"]]
                      nil]]
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (value/bounded-typed-value! type invalid))))))
 
 (deftest bounded-record-values-seal-nominal-schema-and-field-types
@@ -207,23 +207,23 @@
                      [type "Kotoba" "7" [[:option :string] false]]
                      [other-type "Kotoba" 7 [[:option :string] false]]
                      nil]]
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (value/bounded-typed-value! type invalid)))))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"record fields are invalid"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"record fields are invalid"
                (value/validate-value-type!
                          [:record :demo/bad [[:x :i64] [:x :string]]])))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"record fields are invalid"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"record fields are invalid"
                         (value/validate-value-type!
                          [:record :demo/large
                           (mapv (fn [i] [(keyword (str "f" i)) :i64]) (range 33))]))))
 
 (deftest vector-i64-is-bounded-and-homogeneous
   (is (= [1 2 3] (value/bounded-vector-i64! [1 2 3])))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a vector-i64"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"not a vector-i64"
                         (value/bounded-vector-i64! '(1 2))))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a signed i64"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"not a signed i64"
                         (value/bounded-vector-i64! [1 "2"])))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceeds item limit"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"exceeds item limit"
                         ;; One past the limit, derived rather than written
                         ;; out: this pinned 16385 and went green for the wrong
                         ;; reason the moment the limit moved -- it asserted a
@@ -254,5 +254,5 @@
                                              [:x 24] [:y 25] [:z 26] [:aa 27]
                                              [:ab 28] [:ac 29] [:ad 30] [:ae 31]
                                              [:af 32] [:ag 33]]]]]
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (value/bounded-typed-value! (first invalid) invalid))))))

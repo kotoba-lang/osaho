@@ -21,7 +21,7 @@
 
 (defn- trapped [thunk]
   (try (do (thunk) nil)
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e (ex-data e))))
+       (catch :default e (ex-data e))))
 
 (def ^:private address-cases
   {'ucs2          (module '[] '(ucs2 "AIUEOS"))

@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-progressive-stream-test
   "Progressive live push on open chunk-queue streams — ADR 0126."
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is]]
             [kotoba.kir.value :as value]))
 
 (deftest open-stream-pending-then-enqueue-then-close
@@ -28,7 +28,7 @@
 (deftest enqueue-after-close-fails
   (let [stream (value/make-open-chunk-queue-bytes-stream)]
     (value/stream-close! stream)
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"closed"
                           (value/stream-enqueue! stream (byte-array [1]))))))
 
 (deftest close-drains-remaining-then-done
@@ -67,10 +67,10 @@
 (deftest enqueue-budget-and-mode-fail-closed
   (let [stream (value/make-open-chunk-queue-bytes-stream)
         huge (byte-array (inc value/bytes-value-byte-limit))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceed"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"exceed"
                           (value/stream-enqueue! stream huge))))
   (let [linear (value/make-bytes-stream (byte-array [1]))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"chunk-queue"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"chunk-queue"
                           (value/stream-enqueue! linear (byte-array [2]))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"chunk-queue"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"chunk-queue"
                           (value/stream-close! linear)))))

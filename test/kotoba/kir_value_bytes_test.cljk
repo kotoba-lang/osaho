@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-bytes-test
   "First-slice tests for runtime `:bytes` (ADR 0120 / W5 get-stream unblock)."
-  (:require [kotoba.bytes :as kbytes] [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.bytes :as kbytes] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest bytes-value-predicates-and-bounds
@@ -14,9 +14,9 @@
     (is (zero? (value/bytes-byte-count empty)))
     (is (= 2 (value/bytes-byte-count small)))
     (is (identical? small (value/bounded-bytes! small)))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceeds byte limit"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"exceeds byte limit"
                           (value/bounded-bytes! huge)))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not bytes"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"not bytes"
                           (value/bytes-byte-count "x")))))
 
 (deftest bytes-as-leaf-type-and-typed-value
@@ -24,7 +24,7 @@
   (let [payload (value/utf8-string->bytes "payload-bytes")]
     (is (value/bytes-value? payload))
     (is (identical? payload (value/bounded-typed-value! :bytes payload)))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not bytes"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"not bytes"
                           (value/bounded-typed-value! :bytes "still-a-string")))))
 
 (deftest bytes-total-order-is-lexicographic

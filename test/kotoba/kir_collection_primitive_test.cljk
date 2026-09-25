@@ -39,7 +39,7 @@
 
 (defn- trap-of [result body]
   (try (do (ir/execute (unit result body) 'main [] {}) nil)
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+       (catch :default e
          (:trap (ex-data e)))))
 
 ;; --- vector-take: the rear truncation that did not exist -------------------

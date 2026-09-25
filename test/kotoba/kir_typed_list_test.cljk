@@ -1,5 +1,5 @@
 (ns kotoba.kir-typed-list-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
 (defn- module [body]
@@ -18,12 +18,12 @@
 (deftest canonical-typed-lists-fail-closed
   (testing "items are checked against the declared descriptor"
     (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"signed i64"
+         kerror/ExceptionInfo #"signed i64"
          (kir/execute
           (module '(vector-count (typed-list-new [:list :i64] 4 false)))
           'main []))))
   (testing "the constructor requires a list descriptor"
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (kir/execute
                   (module '(typed-list-new [:vector [:i64]] 4))
                   'main [])))))

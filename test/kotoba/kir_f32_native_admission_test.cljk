@@ -30,7 +30,7 @@
     *-to-i64-truncating       three answers on an out-of-domain input: x86
                               yields INT64_MIN, AArch64 saturates, this
                               interpreter traps."
-  (:require [kotoba.lang.text :as str]
+  (:require [kotoba.lang.error :as kerror] [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]
             [kotoba.kir.value :as value]
@@ -260,7 +260,7 @@
   ;; above Integer/MAX_VALUE and must be brought back with `i32-wrap` before it
   ;; is read as a float. The interpreter refuses rather than guessing.
   (is (thrown-with-msg?
-       clojure.lang.ExceptionInfo #"f32 bit pattern is not signed i32"
+       kerror/ExceptionInfo #"f32 bit pattern is not signed i32"
        (value/i64-bits-to-f32 3212836864)))
   (is (= bits-minus-one (run (f32 bits-minus-one)))
       "the same pattern presented as a signed i32 is accepted"))

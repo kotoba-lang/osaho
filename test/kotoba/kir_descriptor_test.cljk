@@ -13,7 +13,7 @@
   which is why `capability-contracts` could throw on ClojureScript for over a
   month with a green suite: the one host where a capability id is a JS BigInt
   was the one host this file never reached."
-  (:require #?(:clj  [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] #?(:clj  [kotoba.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing]])
             [kotoba.kir.descriptor :as descriptor]))
 
@@ -86,7 +86,7 @@
             (descriptor/encode-descriptor [:record :a/r [[:y :string] [:x :i64]]]))))
 
 (deftest an-unknown-descriptor-is-refused-rather-than-encoded-as-something-else
-  (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+  (is (thrown? kerror/ExceptionInfo
                (descriptor/encode-descriptor [:tuple :i64 :i64]))
       "an unknown STRUCTURE is named in a phase-tagged rejection")
   ;; An unknown bare keyword is refused too, but by falling into `first` rather
@@ -178,7 +178,7 @@
 
 (deftest one-capability-id-may-not-carry-two-contracts
   ;; The invariant that lets a module name a capability by id alone.
-  (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+  (is (thrown? kerror/ExceptionInfo
                (descriptor/capability-contracts
                 (kir '(+ (typed-cap-call 7 :string :string "x")
                          (typed-cap-call 7 :i64 :i64 1))))))
@@ -186,7 +186,7 @@
     ;; The grouping step, which is the third place a BigInt id was hashed.
     ;; A refusal that stops firing is not a smaller defect than a compile that
     ;; stops working.
-    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+    (is (thrown? kerror/ExceptionInfo
                  (descriptor/capability-contracts
                   (kir (list '+
                              (list 'typed-cap-call (wire-id 7) :string :string "x")

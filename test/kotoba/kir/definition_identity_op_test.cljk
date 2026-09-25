@@ -7,7 +7,7 @@
   compiler's own function map was accepted, and its KIR keeps bodies as source
   forms rather than IR nodes, so the mistake was available rather than
   hypothetical."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.definition-identity :as di]))
 
 (def ^:private base
@@ -37,7 +37,7 @@
         (is (re-find #":op" (:message error))
             "the message names what is missing"))))
   (testing "and refusing means no CID, rather than a CID over the wrong shape"
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (di/definition-cid (assoc base :definition/kir {:value 1}))))))
 
 (deftest a-non-map-is-still-refused-for-its-own-reason
