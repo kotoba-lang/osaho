@@ -1,6 +1,6 @@
 (ns kotoba.kir-trap-source-test
   "T3.3: fuel-exhausted traps cite function + call-stack tip."
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is]]
             [kotoba.kir :as kir]))
 
 (defn- deep-loop-kir
@@ -26,7 +26,7 @@
     ;; trap, :host/stack-exhausted, and no longer passes for fuel.
     (kir/execute (deep-loop-kir) 'main [] {:fuel 3})
     (is false "expected fuel trap")
-    (catch clojure.lang.ExceptionInfo e
+    (catch kerror/ExceptionInfo e
       (let [d (ex-data e)]
         (is (= :budget/fuel (:trap d)))
         (is (= :ir (:phase d)))

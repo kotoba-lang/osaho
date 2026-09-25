@@ -16,7 +16,7 @@
   So these tests do the thing ADR 0219 asked for and would not assume: they
   EXECUTE a `:bool` parameter, in every position one can occupy, before the
   admission gate is allowed to admit one."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]
             [kotoba.test-hir :as test-hir]))
 
@@ -52,11 +52,11 @@
   ;; here would make the interpreter accept a spelling no other target's entry
   ;; boundary produces, and the shared corpora would stop comparing.
   (let [program (module '(if b 1 0) :i64)]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"argument must be a boolean"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"argument must be a boolean"
                           (run program [1])))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"argument must be a boolean"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"argument must be a boolean"
                           (run program [0])))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"argument must be a boolean"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"argument must be a boolean"
                           (run program ["true"])))))
 
 (deftest a-bool-parameter-drives-the-bool-operations
@@ -223,5 +223,5 @@
       (is (= [:bool] (:param-types (first (:functions lowered)))))
       (is (= 1 (:oracle-value lowered))))
     (testing "without a HIR version, the inter-repository contract rejects first"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"missing-module-keys"
+      (is (thrown-with-msg? kerror/ExceptionInfo #"missing-module-keys"
                             (kir/lower (dissoc checked :format)))))))

@@ -1,5 +1,5 @@
 (ns kotoba.kir.document-edn-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (def document
@@ -37,7 +37,7 @@
     (is (= doc (value/document-edn-read "#{\"one\" 1 :ready}")))
     (is (= doc (value/document-read (value/document-print doc))))
     (is (neg? (value/document-compare ["i64" 1] ["string" "one"])))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"duplicate set item"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"duplicate set item"
                           (value/document-edn-read "#{:ready :ready}")))))
 
 (deftest textual-edn-general-map-keys-roundtrip-canonically
@@ -47,7 +47,7 @@
     (is (= doc (value/document-read (value/document-print doc))))
     (is (= [["keyword" :ready] ["bool" true]]
            (first (second doc))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"duplicate map key"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"duplicate map key"
                           (value/document-edn-read "{[1] :a [1] :b}")))))
 
 (deftest legacy-keyword-map-keys-preserve-the-node-budget
@@ -62,7 +62,7 @@
 (deftest textual-edn-printer-rejects-ambiguous-symbols
   (doseq [item [(symbol "nil") (symbol "true") (symbol "42")
                 (symbol ":keyword") (symbol "#tag")]]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ambiguous symbol"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"ambiguous symbol"
                           (value/document-edn-print ["symbol" item])))))
 
 (deftest textual-edn-reader-fails-closed
@@ -76,5 +76,5 @@
            ["i64 overflow" "9223372036854775808"]
            ["non-finite" "1e999"]]]
     (testing label
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"document-edn-read"
+      (is (thrown-with-msg? kerror/ExceptionInfo #"document-edn-read"
                             (value/document-edn-read input))))))

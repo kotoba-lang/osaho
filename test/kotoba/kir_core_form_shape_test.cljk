@@ -56,7 +56,7 @@
 
 (defn- refusal [thunk]
   (try (do (thunk) nil)
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+       (catch :default e
          (merge {:message (ex-message e)} (ex-data e)))))
 
 (defn- w [x] #?(:clj x :cljs (js/Number x)))

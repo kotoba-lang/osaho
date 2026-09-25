@@ -1,15 +1,15 @@
 (ns kotoba.kir-value-task-stream-test
   "First-slice tests for host [:task [:stream :bytes]] / [:stream :bytes]
   (ADR 0121 — get-stream dual-runtime unblock)."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir.value :as value]))
 
 (deftest stream-and-task-types-are-admitted
   (is (= [:stream :bytes] (value/validate-value-type! [:stream :bytes])))
   (is (= [:task [:stream :bytes]] (value/validate-value-type! [:task [:stream :bytes]])))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"stream item type must be :bytes"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"stream item type must be :bytes"
                         (value/validate-value-type! [:stream :string])))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"task result type must be"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"task result type must be"
                         (value/validate-value-type! [:task :bytes]))))
 
 (deftest ready-task-round-trips-through-typed-value
@@ -37,7 +37,7 @@
     (is (true? (:done? c)))
     (is (= 2 (value/bytes-byte-count (:bytes c))))
     (value/stream-cancel! stream)
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"cancelled"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"cancelled"
                           (value/stream-read! stream 1)))))
 
 (deftest pending-and-cancelled-tasks

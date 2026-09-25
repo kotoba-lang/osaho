@@ -1,5 +1,5 @@
 (ns kotoba.kir-definition-identity-test
-  (:require [kotoba.lang.edn :as edn]
+  (:require [kotoba.lang.error :as kerror] [kotoba.lang.edn :as edn]
             [kotoba.io :as io]
             [kotoba.test :refer [deftest is testing]]
             [cbor.core :as cbor]
@@ -49,9 +49,9 @@
     (is (= (identity/normalize #{:a :b})
            (identity/normalize #{:b :a}))))
   (testing "unknown and inexact host values are rejected"
-    (is (thrown? clojure.lang.ExceptionInfo (identity/normalize (java.util.Date.))))
-    (is (thrown? clojure.lang.ExceptionInfo (identity/normalize 1.5)))
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo (identity/normalize (java.util.Date.))))
+    (is (thrown? kerror/ExceptionInfo (identity/normalize 1.5)))
+    (is (thrown? kerror/ExceptionInfo
                  (identity/normalize 9007199254740993)))))
 
 ;; ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@
     (let [wire-row (assoc vector-definition :definition/effect-row #{[:cap/call 8]})
           error (identity/definition-error wire-row)]
       (is (= "definition effect row members must be keywords" (:message error)))
-      (is (thrown? clojure.lang.ExceptionInfo (identity/definition-cid wire-row)))))
+      (is (thrown? kerror/ExceptionInfo (identity/definition-cid wire-row)))))
   (testing "(d) the bridge translates the compiler's report to the keyword row
             the identity seals, and the result hashes to the frozen vector a
             hand-resolved row hashes to -- the bridge adds no encoding"
@@ -175,14 +175,14 @@
             still refused as not a wire capability call"
     (is (= #{:abort :state} identity/control-effects))
     (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"not a wire capability call"
+         kerror/ExceptionInfo #"not a wire capability call"
          (identity/effect-row-from-hir {:effects #{:not/a-control-effect}}
                                        {:id->name catalog})))))
 
 (defn- bridge-failure [hir opts]
   (try (identity/effect-row-from-hir hir opts)
        nil
-       (catch clojure.lang.ExceptionInfo e
+       (catch kerror/ExceptionInfo e
          {:message (.getMessage e) :data (ex-data e)})))
 
 (deftest unnamed-wire-ids-are-refused-not-guessed

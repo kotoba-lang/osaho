@@ -34,7 +34,7 @@
     the existing traversal, not the thing itself.
   - Not per-node identity. The two CIDs in play are the two DEFINITION CIDs.
     That is the point being made, not a limitation being apologised for."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [cbor.core :as cbor]
             [ipld.link :as link]
             [ipld.selector :as selector]
@@ -128,7 +128,7 @@
     (is (= :kir-path/link-crossed
            (try (nodes-by-path ["vec" [(link/link (identity/definition-cid (definition 2)))]])
                 nil
-                (catch clojure.lang.ExceptionInfo e (:problem (ex-data e))))))))
+                (catch kerror/ExceptionInfo e (:problem (ex-data e))))))))
 
 (deftest one-changed-leaf-has-exactly-one-scalar-path
   (let [paths (differing-paths before after)

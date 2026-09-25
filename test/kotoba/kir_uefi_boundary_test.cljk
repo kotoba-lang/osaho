@@ -22,7 +22,7 @@
 
 (defn- trapped [thunk]
   (try (thunk) nil
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e (ex-data e))))
+       (catch :default e (ex-data e))))
 
 (def ^:private cases
   {'kernel-system-table (module '[] '(kernel-system-table))

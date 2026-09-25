@@ -1,6 +1,6 @@
 (ns kotoba.kir-guest-task-ops-test
   "Guest-language task poll/read ops (ADR 0127) via KIR execute."
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is]]
             [kotoba.kir :as kir]
             [kotoba.kir.value :as value]))
 
@@ -36,5 +36,5 @@
 (deftest bytes-task-byte-count-pending-traps
   (let [pending (value/make-pending-bytes-task)
         kir (unary-task-kir '(bytes-task-byte-count x))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"task-not-ready"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"task-not-ready"
                           (kir/execute kir 'main [pending])))))

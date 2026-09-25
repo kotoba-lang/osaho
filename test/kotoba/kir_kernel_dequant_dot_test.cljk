@@ -228,7 +228,7 @@
 
 (defn- trapped [thunk]
   (try (thunk) nil
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e (ex-data e))))
+       (catch :default e (ex-data e))))
 
 ;; ---------------------------------------------------------------------------
 ;; Q8_0: 34 bytes carry 32 elements

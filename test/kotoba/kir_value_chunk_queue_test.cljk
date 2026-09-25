@@ -1,6 +1,6 @@
 (ns kotoba.kir-value-chunk-queue-test
   "True multi-chunk producer stream (chunk-queue) — ADR 0125."
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is]]
             [kotoba.kir.value :as value]))
 
 (deftest chunk-queue-yields-one-producer-chunk-per-read
@@ -21,7 +21,7 @@
   "Unlike make-bytes-stream-from-chunks, max-bytes cannot split a producer chunk."
   (let [a (byte-array [1 2 3 4])
         stream (value/make-chunk-queue-bytes-stream [a])]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceeds max-bytes"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"exceeds max-bytes"
                           (value/stream-read! stream 2)))))
 
 (deftest ready-task-from-chunk-queue
@@ -53,8 +53,8 @@
     (is (true? (:done? c2)))))
 
 (deftest chunk-queue-empty-or-oversize-fails-closed
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"non-empty"
+  (is (thrown-with-msg? kerror/ExceptionInfo #"non-empty"
                         (value/make-chunk-queue-bytes-stream [])))
   (let [huge (byte-array (inc value/bytes-value-byte-limit))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceed"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"exceed"
                           (value/make-chunk-queue-bytes-stream [huge])))))

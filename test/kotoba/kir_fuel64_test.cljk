@@ -68,7 +68,7 @@
 
 (defn- trap-of [thunk]
   (try (thunk) nil
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+       (catch :default e
          (ex-data e))))
 
 (def ^:private iterations 1000)

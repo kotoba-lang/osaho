@@ -1,6 +1,6 @@
 (ns kotoba.kir-string-split-count-test
   "T4.2: string-split-count segment arithmetic."
-  (:require [kotoba.test :refer [deftest is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is]]
             [kotoba.kir :as ir]))
 
 (defn- run [haystack sep]
@@ -30,5 +30,5 @@
   (try
     (run "abc" "")
     (is false "expected trap")
-    (catch clojure.lang.ExceptionInfo e
+    (catch kerror/ExceptionInfo e
       (is (= :empty-string-split-separator (:trap (ex-data e)))))))

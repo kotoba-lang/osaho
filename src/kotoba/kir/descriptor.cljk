@@ -22,7 +22,8 @@
   No require: measured after extraction, the descriptor half never touched
   `kotoba.kir.cljs-i64`. Its single use is in `infer-type`, which stays with
   the wasm-specific half."
-  {:kotoba/export [boolean-result-ops capability-contracts descriptor-indices descriptor-table descriptor? encode-descriptor keyword-text primitive-tags scalar-adt-aliases text-bytes uleb utf8]})
+  {:kotoba/export [boolean-result-ops capability-contracts descriptor-indices descriptor-table descriptor? encode-descriptor keyword-text primitive-tags scalar-adt-aliases text-bytes uleb utf8]}
+  (:require [kotoba.bytes :as kbytes]))
 
 (def primitive-tags
   {:i64 0 :string 1 :keyword 2 :bool 3 :symbol 19 :vector-i64 11 :f64 12 :f32 13
@@ -99,7 +100,7 @@
                 (+ 0x80 (bit-and cp 0x3F)))))
 
 (defn utf8 [text]
-  #?(:clj (mapv #(bit-and (int %) 0xff) (.getBytes ^String text "UTF-8"))
+  #?(:clj (mapv #(bit-and (int %) 0xff) (kbytes/utf8-bytes ^String text))
      :cljs (vec (js/Array.from (.encode (js/TextEncoder.) text)))
      ;; Kotoba (adr-2609242330 S1): a Kotoba string is UTF-8 already, so the
      ;; bytes are its code points re-encoded, read at byte offsets. It cannot

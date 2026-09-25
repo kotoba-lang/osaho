@@ -39,8 +39,8 @@
   that passes both reports, so `check-block` answers
   `:checked :not-answered` and `the-verdict-refuses-to-answer-checkedness`
   pins that it never says otherwise."
-  (:require [kotoba.test :refer [deftest is testing]]
-            [clojure.java.io :as io]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
+            [kotoba.io :as io]
             [ipld.schema :as schema]
             [ipld.schema-dsl :as dsl]
             [kotoba.lang.edn :as edn]
@@ -105,7 +105,7 @@
     (try
       (check-node! block counter)
       {:shape :conforms :nodes @counter :checked :not-answered}
-      (catch clojure.lang.ExceptionInfo e
+      (catch kerror/ExceptionInfo e
         {:shape :refused
          :problem (or (:problem (ex-data e)) (:problem (ex-data e) :ipld/schema))
          :nodes @counter

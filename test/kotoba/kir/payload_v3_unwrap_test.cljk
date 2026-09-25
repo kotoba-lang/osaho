@@ -26,8 +26,8 @@
   The same payload is encoded BOTH ways in every case, and the assertions are
   about the difference. A test that only encoded the unwrapped form would pass
   just as well if `unwrap` were `identity` and the defect did not exist."
-  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
-            [clojure.java.io :as io]
+  (:require [kotoba.lang.error :as kerror] [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
+            [kotoba.io :as io]
             [kotoba.lang.edn :as edn]
             [kotoba.lang.coll :as walk]
             [cbor.core :as cbor]
@@ -194,7 +194,7 @@
     (let [beyond (inc value/max-safe-integer)]
       (is (= :value/integer-out-of-range
              (:problem (ex-data (try (bytes-of beyond)
-                                     (catch clojure.lang.ExceptionInfo e e)))))
+                                     (catch kerror/ExceptionInfo e e)))))
           "a bare host integer beyond the range has no encoding")
       (is (value/int64? (unwrap (identity/i64 (str beyond))))
           "and the conversion reaches the value model's exact integer")

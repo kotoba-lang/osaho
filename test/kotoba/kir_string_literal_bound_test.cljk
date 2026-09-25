@@ -11,5 +11,5 @@
   (let [five-k (apply str (repeat 5042 "w"))
         over (apply str (repeat (inc value/string-literal-byte-limit) "w"))]
     (is (= five-k (value/bounded-string! five-k value/string-literal-byte-limit)))
-    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs :default)
+    (is (thrown? :default
                  (value/bounded-string! over value/string-literal-byte-limit)))))

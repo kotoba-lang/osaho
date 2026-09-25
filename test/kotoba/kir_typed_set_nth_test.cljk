@@ -1,6 +1,6 @@
 (ns kotoba.kir-typed-set-nth-test
   "T8.3 typed-set-nth: index into sorted set items for guest fold/EDN encode."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as ir]))
 
 (deftest typed-set-nth-returns-sorted-items
@@ -41,5 +41,5 @@
       (try
         (ir/execute mod 'main [] {})
         (is false "expected trap")
-        (catch clojure.lang.ExceptionInfo e
+        (catch kerror/ExceptionInfo e
           (is (= :set-index-out-of-bounds (:trap (ex-data e)))))))))
