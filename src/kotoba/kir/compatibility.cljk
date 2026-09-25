@@ -16,12 +16,16 @@
    :runtime (:runtime target-profile)
    :value-abi value-abi
    :tender-role tender-role
-   :tender-contract (case (:execution target-profile)
-                      :javascript :kotoba.restricted-esm/v1
-                      :wasm :kotoba.capability-host/v1
-                      :native :kotoba.supervisor/v1
-                      :process :kotoba.aiueos-process/v1
-                      :kernel :kotoba.aiueos-kernel/v1
-                      :firmware :kotoba.aiueos-firmware/v1
-                      :cljs :kotoba.cljs-host/v1
-                      :kotoba.unsupported/v1)})
+   ;; adr-2609251400 C2: a `:native` profile whose runtime is the in-image
+   ;; prelude is not tendered by the kexe supervisor.
+   :tender-contract (if (= :kotoba-linux-static-prelude-v1 (:runtime target-profile))
+                      :kotoba.linux-static/v1
+                      (case (:execution target-profile)
+                        :javascript :kotoba.restricted-esm/v1
+                        :wasm :kotoba.capability-host/v1
+                        :native :kotoba.supervisor/v1
+                        :process :kotoba.aiueos-process/v1
+                        :kernel :kotoba.aiueos-kernel/v1
+                        :firmware :kotoba.aiueos-firmware/v1
+                        :cljs :kotoba.cljs-host/v1
+                        :kotoba.unsupported/v1))})
