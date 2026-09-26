@@ -2261,7 +2261,10 @@
     kernel-dequant-dot-iq4-xs {:block-bytes 136 :block-elements 256}
     kernel-dequant-dot-iq2-s {:block-bytes 82 :block-elements 256}
     kernel-dequant-dot-iq3-xxs {:block-bytes 98 :block-elements 256}
-    kernel-dequant-dot-iq3-s {:block-bytes 110 :block-elements 256}})
+    kernel-dequant-dot-iq3-s {:block-bytes 110 :block-elements 256}
+    ;; dequant-ptq1: Prism's group-128 ternary (kotoba-gmir ADR 0031). A code
+    ;; is a base-3 digit, so there is no table -- only a digit extraction.
+    kernel-dequant-dot-ptq1-0 {:block-bytes 28 :block-elements 128}})
 
 (def ^:private kernel-dequant-dot-operations
   (set (keys kernel-dequant-dot-formats)))
@@ -3165,7 +3168,26 @@
                        acc (range 4))))
                   acc (range 4))))
              acc (range 2))))
-        out (range 4))))))
+        out (range 4))))
+
+    kernel-dequant-dot-ptq1-0
+    ;; `dequantize_row_ptq1_0`, PrismML-Eng/llama.cpp @9a9394a8
+    ;; (`ggml/src/ggml-quants.c:2255`, MIT): qs[24] at 0, qh[2] at 24, d at
+    ;; 26. The C writes three stages -- qs[m] for n 0..4, m 0..15 (80 values);
+    ;; qs[16+m] for n 0..4, m 0..7 (40); qh[h] for n 0..3, h 0..1 (8) -- and
+    ;; digit n of a byte is `((uint8)(byte * 3^n) * 3) >> 8`, in 0..2. The
+    ;; value is `(float)(digit - 1) * d`: one multiply by -1, 0 or +1, so it
+    ;; is exact, and 0 times a negative d is -0.0 exactly as in the C.
+    (let [d (dequant-half image (+ slot 26))
+          digit (fn [byte n]
+                  (quot (* (bit-and (* byte (nth [1 3 9 27 81] n)) 255) 3) 256))
+          element (fn [e]
+                    (let [[at n] (cond
+                                   (< e 80) [(+ slot (mod e 16)) (quot e 16)]
+                                   (< e 120) [(+ slot 16 (mod (- e 80) 8)) (quot (- e 80) 8)]
+                                   :else [(+ slot 24 (mod (- e 120) 2)) (quot (- e 120) 2)])]
+                      (as-f32 (* (- (digit (image-u8 image at) n) 1) d))))]
+      (mapv element (range 128)))))
 
 (defn- kernel-dequant-dot-checks!
   "The seven checks the emitter emits, in the emitter's order, so a program
