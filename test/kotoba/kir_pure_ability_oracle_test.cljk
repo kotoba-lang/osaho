@@ -35,5 +35,14 @@
   (testing "the pure control seals the same value"
     (is (= "42" (sealed (module #{}))))))
 
+(deftest an-abort-row-is-oracled
+  ;; lang/abort-ability.edn: throw / try are result values before KIR, so a
+  ;; module whose row carries :abort is as deterministic as a pure one
+  ;; (gap 4 of the selfhost foundation, superproject adr-2609242330).
+  (is (= "42" (sealed (module #{:abort}))))
+  (is (= "42" (sealed (module #{:state :abort})))))
+
 (deftest a-capability-row-is-still-not-oracled
-  (is (nil? (sealed (module #{[:cap/call 7]})))))
+  (is (nil? (sealed (module #{[:cap/call 7]}))))
+  (testing "beside a pure ability too"
+    (is (nil? (sealed (module #{:abort [:cap/call 7]}))))))

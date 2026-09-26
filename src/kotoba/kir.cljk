@@ -5918,8 +5918,15 @@
         ;; the frontend lowered it to state passing and its handler is part of
         ;; the program, so a module whose only row member is `:state` is as
         ;; deterministic as a pure one and is oracled like one.
+        ;; `:abort` (kotoba-lang `lang/abort-ability.edn`) is too, since
+        ;; 2026-09-26 (gap 4 of the selfhost foundation, superproject
+        ;; adr-2609242330): the frontend lowered every throw / try to
+        ;; `[:result T E]` values before KIR existed, so an aborting module is
+        ;; ordinary functions over result values -- nothing unwinds and no
+        ;; host is touched. Before this a module with any abort sealed no
+        ;; oracle, and the native verifier refused it by name.
         oracle (when (and (:entry hir) (contains? #{:i64 :bool} (:result hir))
-                          (every? #{:state} (:effects hir)) (not kernel-native?))
+                          (every? #{:state :abort} (:effects hir)) (not kernel-native?))
                  (try
                    {:value (execute base (:entry hir) []
                                     (cond-> {:fuel (or (:oracle-fuel opts) default-oracle-fuel)}
