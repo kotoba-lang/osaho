@@ -974,6 +974,20 @@
                   ;; increment measured `bit-or` and `bit-not`, not them.
                   (contains? '#{bit-or bit-not} op)
                   (every? walk args)
+                  ;; i64 `min` / `max`, widened 2026-09-26 (superproject
+                  ;; adr-2609242330, selfhost stage 2). They sat in
+                  ;; `non-string-typed-ops` with no case here -- `bit-or`'s
+                  ;; absence exactly, and an implementation state, not a
+                  ;; property: on i64 words there is no NaN and no signed zero,
+                  ;; so the disagreement that keeps `f32-min` / `f32-max` out
+                  ;; cannot arise. Both native backends lower them to a compare
+                  ;; and a select over the same words (kotoba-native
+                  ;; `normalize-surface-operations`), no new representation.
+                  ;; The frontend declares both strictly binary
+                  ;; (`kotoba.compiler.frontend/i64-operations`); that arity is
+                  ;; re-derived here rather than trusted.
+                  (contains? '#{min max} op)
+                  (and (= 2 (count args)) (every? walk args))
                   ;; The shift family, widened 2026-09-08. The comment above
                   ;; gave the reason for their absence as "this increment
                   ;; measured `bit-or` and `bit-not`, not them" -- an
@@ -5524,8 +5538,16 @@
                bit-xor (i64/->bigint (apply bit-xor xs))
                bit-and (i64/->bigint (apply bit-and xs))
                bit-or (i64/->bigint (apply bit-or xs))
-               min (i64/->bigint (reduce js/Math.min (map js/Number xs)))
-               max (i64/->bigint (reduce js/Math.max (map js/Number xs)))
+               ;; Compared as bigints, never through Number: until
+               ;; 2026-09-26 these were `(reduce js/Math.min (map js/Number
+               ;; xs))`, which rounds every word past 2^53 -- (min
+               ;; 9223372036854775806 9223372036854775807) answered 2^63, a
+               ;; value outside i64 that trapped :value-type-mismatch at the
+               ;; next typed boundary, while the :clj branch above answered
+               ;; exactly. Measured while qualifying i64 min/max on native
+               ;; (superproject adr-2609242330, selfhost stage 2).
+               min (reduce (fn [a b] (if (<= a b) a b)) xs)
+               max (reduce (fn [a b] (if (>= a b) a b)) xs)
                = (if (apply = xs) i64/one i64/zero)
                < (if (apply < xs) i64/one i64/zero)
                > (if (apply > xs) i64/one i64/zero)
