@@ -22,11 +22,25 @@
       (is (true? (kir/only-native-word-typed-features?
                   (hir vector-type false)))))))
 
-(deftest native-vector-handles-do-not-cross-kexe-export-parameter-boundaries
-  (doseq [vector-type [:vector-i64 :vector-f64]]
-    (testing (name vector-type)
+(deftest native-vector-f64-handles-do-not-cross-kexe-export-parameter-boundaries
+  ;; :vector-f64 has no loader wire form, so it stays private.
+  (is (false? (kir/only-native-word-typed-features? (hir :vector-f64 true)))))
+
+(deftest native-codec-handles-cross-kexe-export-boundaries
+  ;; :vector-i64 and :bytes: the loader's boundary codec builds the handle
+  ;; from a typed wire form and decodes a result back (adr-2609242330).
+  (is (= #{:vector-i64 :bytes} kir/native-export-codec-types))
+  (is (true? (kir/only-native-word-typed-features? (hir :vector-i64 true))))
+  (let [module {:format :kotoba.hir/v3 :entry 'main :exports ['main 'byte-at 'echo]
+                :functions [{:name 'byte-at :params ['b 'i] :param-types [:bytes :i64]
+                             :result :i64 :body '(bytes-at b i)}
+                            {:name 'echo :params ['b] :param-types [:bytes]
+                             :result :bytes :body 'b}
+                            {:name 'main :params [] :param-types [] :result :i64 :body 0}]}]
+    (is (true? (kir/only-native-word-typed-features? module)))
+    (testing "the ENTRY still returns no handle"
       (is (false? (kir/only-native-word-typed-features?
-                   (hir vector-type true)))))))
+                   (assoc module :entry 'echo)))))))
 
 (deftest native-vector-results-may-cross-a-non-entry-export-by-copy
   (doseq [vector-type [:vector-i64 :vector-f64]]
@@ -43,7 +57,9 @@
         (is (true? (kir/only-native-word-typed-features? module)))))))
 
 (deftest native-vector-export-copy-v1-is-zero-arity
-  (doseq [vector-type [:vector-i64 :vector-f64]]
+  ;; :vector-i64 now crosses through the boundary codec with parameters too;
+  ;; the zero-arity copy rule still governs :vector-f64.
+  (doseq [vector-type [:vector-f64]]
     (let [constructor (if (= :vector-f64 vector-type)
                         'vector-f64-new 'vector-new)
           module {:format :kotoba.hir/v3 :entry 'main

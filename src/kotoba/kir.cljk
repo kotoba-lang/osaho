@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations budget-traps default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-export-codec-types budget-traps default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -645,8 +645,23 @@
   ;; `:bytes` joined 2026-09-25: on native it is a vector-arena handle too.
   (contains? #{:vector-i64 :vector-f64 :string-index :bytes} type))
 
+(def native-export-codec-types
+  "Context-owned handle types an EXPORT may take and return, because the kexe
+  loader's boundary codec (amu tools/kexe_loader.c, rules in
+  tools/kexe_loader_decisions.kotoba ops 10-13; superproject
+  adr-2609242330 / adr-2609251400) builds them itself from a typed wire form
+  (`vi:` decimal items, `b:` hex bytes), validates them against the boundary
+  traversal budget, and decodes them back out of the arena after the call.
+  A host never names a handle: a bare word in a handle-typed slot is refused
+  by the loader as :boundary/forged-handle. `:vector-f64` and
+  `:string-index` have no wire form and stay private (the latter's
+  operations are sealed). `kotoba.verifier` keeps an independent copy;
+  `kotoba.verifier-kir-agreement-test` compares the two."
+  #{:vector-i64 :bytes})
+
 (defn- native-function-boundary-type? [type schemas exported?]
   (or (native-boundary-type? type schemas)
+      (contains? native-export-codec-types type)
       (and (not exported?)
            (or (native-private-handle-type? type)
                ;; A recursive/generic aggregate handle crosses an INTERNAL
