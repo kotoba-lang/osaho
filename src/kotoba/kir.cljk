@@ -739,6 +739,22 @@
   (cond-> (select-keys kir [:format :entry :exports :signature :effects :functions])
     (recursive-schema-table? (:schemas kir)) (assoc :schemas (:schemas kir))))
 
+(def native-document-operation-arities
+  "Document operations native admits (gap 2 of the selfhost foundation), with
+  their arity: a number, :any (a container of any length), :even (a map's
+  key/value pairs), or :some (at least one)."
+  '{document-null 0 document-bool 1 document-i64 1 document-string 1
+    document-keyword 1 document-symbol 1
+    document-vector :any document-list :any document-set :any document-map :even
+    document-count 1 document-kind 1 document-equal? 2 document-set-contains? 2
+    document-contains 2 document-get 2 document-vector-at 2 document-list-at 2
+    document-map-entry-at 2 document-vector-assoc 3 document-vector-conj 2
+    document-vector-drop 2 document-vector-remove 2 document-vector-sort 1
+    document-assoc 3 document-dissoc 2 document-merge :some
+    document-string-value 1 document-keyword-value 1 document-symbol-value 1
+    document-bool-value 1 document-i64-value 1
+    document-edn-print 1 document-edn-read 1})
+
 (defn only-native-word-typed-features? [hir]
   (letfn [(walk [form]
             (cond
@@ -1227,14 +1243,23 @@
                   (every? walk args)
 
                   ;; Native `:document` is a string-shaped pair handle over
-                  ;; UTF-8 EDN bytes. These two ops stay in
-                  ;; `non-string-typed-ops` (the CLJS gate shares that set)
-                  ;; and are admitted here only: they cost no new ABI word.
-                  (and (= op 'document-edn-read) (= 1 (count args)))
-                  (walk (first args))
-
-                  (and (= op 'document-edn-print) (= 1 (count args)))
-                  (walk (first args))
+                  ;; its canonical UTF-8 EDN text. The two EDN casts are the
+                  ;; identity; every other admitted document operation is
+                  ;; rewritten by kotoba-native (`kotoba.native.document`) onto
+                  ;; the string slots and emitted helpers -- no new ABI word
+                  ;; (gap 2 of the selfhost foundation, superproject
+                  ;; adr-2609242330). They stay in `non-string-typed-ops` (the
+                  ;; CLJS gate shares that set) and are admitted here only.
+                  ;; Not admitted: document-f64 / document-f64-value (native
+                  ;; has no f64 text), document-sha256, document-print /
+                  ;; document-read (canonical bytes as hex).
+                  (contains? native-document-operation-arities op)
+                  (let [arity (get native-document-operation-arities op)]
+                    (and (cond (= :even arity) (even? (count args))
+                               (= :any arity) true
+                               (= :some arity) (pos? (count args))
+                               :else (= arity (count args)))
+                         (every? walk args)))
 
                   ;; A native string-index is lowered by kotoba-native into a
                   ;; private alternating key-handle/value vector. The five
