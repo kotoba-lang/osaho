@@ -100,7 +100,10 @@
 ;; Since P2 of superproject adr-2609242100 (2026-09-24) these two bound a TYPE
 ;; DESCRIPTOR (`validate-value-type!`, checked statically), not a value: a
 ;; value has no depth or node limit, and an untrusted one is walked once
-;; against `boundary-traversal-node-limit` / `-byte-limit` instead.
+;; against `boundary-traversal-node-limit` / `-byte-limit` instead. What bounds
+;; a value built inside a run is the budget its caller granted: every
+;; constructor debits the run's fuel (amu ADR 0353 point 7, kotoba.kir
+;; `cell-constructor-ops`), so a tree is as large as it was paid for.
 (def adt-depth-limit 12)
 (def adt-node-limit 64)
 (def variant-case-limit 32)

@@ -1488,7 +1488,9 @@
 ;; named traps, set per run by the embedder (`execute` :fuel :cells :bytes
 ;; :frames). Their defaults are kotoba-lang lang/limits.edn :profile/reference.
 ;;
-;;   fuel    function entries                         :budget/fuel
+;;   fuel    function entries, and one unit per       :budget/fuel
+;;           constructed cell (below) whether or not
+;;           cells are metered (amu ADR 0353 point 7)
 ;;   cells   heap nodes the run allocates: a pair,    :budget/cells
 ;;           a kgraph datom, a constructed aggregate
 ;;           (variant, record, option/result, list,
@@ -3879,7 +3881,17 @@
                      (trap! :unbound-symbol {:symbol form}))
     :else
     (let [[op & args] form]
-      (when (contains? cell-constructor-ops op) (charge-cells! heap 1 op))
+      ;; A constructor is charged twice over: one unit of the run's FUEL,
+      ;; always, and one cell when the embedder metered cells. The fuel debit
+      ;; is amu ADR 0353 point 7 (floor :allocation-budget): allocation comes
+      ;; out of the same 64-bit ledger execution does, so an allocation is
+      ;; bounded by the budget the caller granted even when no cells budget
+      ;; was named -- and a self-tail loop, whose re-entries are free, cannot
+      ;; build without paying. Before this a loop built any number of records
+      ;; under `:fuel 2` (measured 2026-09-30: 1,000 records, answered).
+      (when (contains? cell-constructor-ops op)
+        (charge! fuel {:operation op :allocation true})
+        (charge-cells! heap 1 op))
       (cond
         ;; `let` body and `if` branch are tail positions -- rebind and loop,
         ;; never call back into this function. See the docstring.
