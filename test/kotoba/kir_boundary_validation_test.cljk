@@ -6,7 +6,7 @@
 
   Both directions, each refusal pinned to its trap name:
     * an INTERNAL 10,000-cell list is admitted (it was refused at 6 cells by
-      the per-value adt-node-limit 512 / adt-depth-limit 32);
+      the per-value adt-node-limit 512 / adt-depth-limit 64);
     * a BOUNDARY input over the traversal budget is refused as
       :budget/boundary-nodes, and the same input under a larger budget is
       admitted -- without overflowing the host stack at 40,000 levels deep;
