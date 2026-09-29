@@ -167,7 +167,7 @@
      result-ok-of result-err-of result-ok?-of result-value-of result-error-of result-match-of
      variant-new variant-match
      option-some-of option-none-of option-some?-of option-value-of option-match
-     typed-list-new typed-list-nth bytes-empty
+     typed-list-new typed-list-nth typed-list-conj bytes-empty
      bytes-count bytes-at bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes string-from-utf8
      hetero-vector-new hetero-vector-count hetero-vector-at hetero-vector-assoc hetero-vector-equal
      typed-set-new typed-set-count typed-set-contains typed-set-conj typed-set-disj typed-set-equal typed-set-nth
@@ -1529,7 +1529,7 @@
 (def ^:private cell-constructor-ops
   '#{pair kgraph-assert! map-new map-assoc option-some result-ok result-err
      result-ok-of result-err-of variant-new option-some-of option-none-of
-     hetero-vector-new hetero-vector-assoc typed-list-new typed-set-new
+     hetero-vector-new hetero-vector-assoc typed-list-new typed-list-conj typed-set-new
      typed-set-conj typed-set-disj typed-map-new typed-map-assoc typed-map-dissoc
      record-new record-assoc vector-new vector-conj vector-assoc vector-assoc!
      bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes
@@ -4577,6 +4577,22 @@
               items (mapv #(eval-expr % env functions fuel heap call-stack cap-call)
                           item-forms)]
           (value/shallow-typed-value! type [type items]))
+
+        ;; The run-time-length constructor. `typed-list-new` takes its items as
+        ;; literal operands, so a list whose length is known only while the
+        ;; program runs could not be built. This appends one item at the END
+        ;; (the meaning `conj` has on a vector) and returns a NEW list; the
+        ;; carrier is bounded by `canonical-list-item-limit`.
+        (= op 'typed-list-conj)
+        (let [[type value-form item-form] args
+              list-value (value/shallow-typed-value!
+                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
+              item (value/shallow-typed-value!
+                    (second type)
+                    (eval-expr item-form env functions fuel heap call-stack cap-call))]
+          (when (>= (count (second list-value)) value/canonical-list-item-limit)
+            (trap! :list-too-large {:limit value/canonical-list-item-limit}))
+          (value/shallow-typed-value! type [type (conj (second list-value) item)]))
 
         ;; `[:list T]` had a constructor and one reader, and only one.
         ;;
