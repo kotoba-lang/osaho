@@ -1,12 +1,61 @@
 (ns kotoba.kir.compatibility
   {:kotoba/export [compiler-version descriptor language-version schema tender-role]})
 
-(def schema :kotoba.compatibility/v1)
-(def compiler-version "kotoba-compiler/1")
-(def language-version :kotoba.language/safe-v1)
-(def tender-role :kototama/component-tender-v1)
+;; Kotoba admits no exported value: each constant is a function of no arguments
+;; there. The host keeps the plain vars callers read today.
+(def ^:private schema-k :kotoba.compatibility/v1)
+(def ^:private compiler-version-s "kotoba-compiler/1")
+(def ^:private language-version-k :kotoba.language/safe-v1)
+(def ^:private tender-role-k :kototama/component-tender-v1)
 
-(defn descriptor [{:keys [hir-format kir-format target target-profile value-abi]}]
+#?(:kotoba (defn schema [] :keyword schema-k)
+   :default (def schema schema-k))
+#?(:kotoba (defn compiler-version [] :string compiler-version-s)
+   :default (def compiler-version compiler-version-s))
+#?(:kotoba (defn language-version [] :keyword language-version-k)
+   :default (def language-version language-version-k))
+#?(:kotoba (defn tender-role [] :keyword tender-role-k)
+   :default (def tender-role tender-role-k))
+
+#?(:kotoba
+   (defn- fld [m :document k :keyword] :document
+     (option-value-of [:option :document] (document-get m k) (document-null))))
+
+#?(:kotoba
+   (defn- kw [m :document] :keyword
+     (option-value-of [:option :keyword] (document-keyword-value m) :none)))
+
+#?(:kotoba
+   (defn- tender-contract [tp :document] :keyword
+     (let [rt (kw (fld tp :runtime))
+           ex (kw (fld tp :execution))]
+       (if (= :kotoba-linux-static-prelude-v1 rt)
+         :kotoba.linux-static/v1
+         (case ex
+           :javascript :kotoba.restricted-esm/v1
+           :wasm :kotoba.capability-host/v1
+           :native :kotoba.supervisor/v1
+           :process :kotoba.aiueos-process/v1
+           :kernel :kotoba.aiueos-kernel/v1
+           :firmware :kotoba.aiueos-firmware/v1
+           :cljs :kotoba.cljs-host/v1
+           :kotoba.unsupported/v1)))))
+
+#?(:kotoba
+   (defn descriptor [m :document] :document
+     (let [tp (fld m :target-profile)]
+       (document-map :format (document-keyword schema-k)
+                     :compiler (document-string compiler-version-s)
+                     :language (document-keyword language-version-k)
+                     :hir (fld m :hir-format)
+                     :kir (fld m :kir-format)
+                     :target (fld m :target)
+                     :runtime (fld tp :runtime)
+                     :value-abi (fld m :value-abi)
+                     :tender-role (document-keyword tender-role-k)
+                     :tender-contract (document-keyword (tender-contract tp)))))
+   :default
+   (defn descriptor [{:keys [hir-format kir-format target target-profile value-abi]}]
   {:format schema
    :compiler compiler-version
    :language language-version
@@ -28,4 +77,4 @@
                         :kernel :kotoba.aiueos-kernel/v1
                         :firmware :kotoba.aiueos-firmware/v1
                         :cljs :kotoba.cljs-host/v1
-                        :kotoba.unsupported/v1))})
+                        :kotoba.unsupported/v1))}))
