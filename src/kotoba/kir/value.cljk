@@ -101,8 +101,8 @@
 ;; DESCRIPTOR (`validate-value-type!`, checked statically), not a value: a
 ;; value has no depth or node limit, and an untrusted one is walked once
 ;; against `boundary-traversal-node-limit` / `-byte-limit` instead.
-(def adt-depth-limit 12)
-(def adt-node-limit 64)
+(def adt-depth-limit 32)
+(def adt-node-limit 512)
 (def variant-case-limit 32)
 (def heterogeneous-vector-item-limit 32)
 (def typed-set-item-limit 32)
