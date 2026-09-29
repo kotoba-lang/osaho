@@ -507,6 +507,11 @@
                    :set (and (= 2 (count type))
                              (or (native-word-value-type? (second type) (inc depth))
                                  (native-scalar-record-type? (second type))))
+                   ;; `[:list T]` is the same word arena as `[:set T]`: a
+                   ;; vector-arena handle whose items are words.
+                   :list (and (= 2 (count type))
+                              (or (native-word-value-type? (second type) (inc depth))
+                                  (native-scalar-record-type? (second type))))
                    :result (and (= 3 (count type))
                                 (native-word-value-type? (second type) (inc depth))
                                 (native-word-value-type? (nth type 2) (inc depth)))
@@ -1177,6 +1182,27 @@
                   (contains? '#{typed-set-count typed-set-nth} op)
                   (let [[type & rest] args]
                     (and (vector? type) (= :set (first type))
+                         (native-word-value-type? type)
+                         (every? walk rest)))
+                  ;; `[:list T]` is the same word arena as a typed set on native:
+                  ;; new, conj (append at the end) and nth lower to the vector
+                  ;; heads (kotoba-native machine_ir); `vector-count` already
+                  ;; walks the carrier.
+                  (= op 'typed-list-new)
+                  (let [[type & items] args]
+                    (and (vector? type) (= :list (first type))
+                         (native-word-value-type? type)
+                         (every? walk items)))
+                  (= op 'typed-list-conj)
+                  (let [[type value item] args]
+                    (and (= 3 (count args))
+                         (vector? type) (= :list (first type))
+                         (native-word-value-type? type)
+                         (walk value) (walk item)))
+                  (= op 'typed-list-nth)
+                  (let [[type & rest] args]
+                    (and (= 3 (count args))
+                         (vector? type) (= :list (first type))
                          (native-word-value-type? type)
                          (every? walk rest)))
 
