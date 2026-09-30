@@ -166,6 +166,54 @@
     (string=? s "bytes-from-vector-i64") 105
     :else 0))
 
+(defn- float-op-code [s :string] :i64
+  (cond
+    (string=? s "f64-from-bits") 120
+    (string=? s "f64-to-bits") 121
+    (string=? s "f64-add") 122
+    (string=? s "f64-sub") 123
+    (string=? s "f64-mul") 124
+    (string=? s "f64-div") 125
+    (string=? s "f64-min") 126
+    (string=? s "f64-max") 127
+    (string=? s "f64-neg") 128
+    (string=? s "f64-abs") 129
+    (string=? s "f64-sqrt") 130
+    (string=? s "f64-eq") 131
+    (string=? s "f64-lt") 132
+    (string=? s "f64-le") 133
+    (string=? s "f64-gt") 134
+    (string=? s "f64-ge") 135
+    (string=? s "f64-unordered") 136
+    (string=? s "f32-from-bits") 140
+    (string=? s "f32-to-bits") 141
+    (string=? s "f32-add") 142
+    (string=? s "f32-sub") 143
+    (string=? s "f32-mul") 144
+    (string=? s "f32-div") 145
+    (string=? s "f32-min") 146
+    (string=? s "f32-max") 147
+    (string=? s "f32-neg") 148
+    (string=? s "f32-abs") 149
+    (string=? s "f32-sqrt") 150
+    (string=? s "f32-eq") 151
+    (string=? s "f32-lt") 152
+    (string=? s "f32-le") 153
+    (string=? s "f32-gt") 154
+    (string=? s "f32-ge") 155
+    (string=? s "f32-unordered") 156
+    (string=? s "i64-to-f64-checked") 160
+    (string=? s "i64-to-f64-rounded") 161
+    (string=? s "f64-to-i64-checked") 162
+    (string=? s "f64-to-i64-truncating") 163
+    (string=? s "f64-to-f32-rounded") 164
+    (string=? s "f32-to-f64-exact") 165
+    (string=? s "i64-to-f32-checked") 166
+    (string=? s "i64-to-f32-rounded") 167
+    (string=? s "f32-to-i64-checked") 168
+    (string=? s "f32-to-i64-truncating") 169
+    :else 0))
+
 (defn- op-code [s :string] :i64
   (let [c (string-code-point-at s 0)
         n (string-byte-length s)]
@@ -194,7 +242,9 @@
       (= c 105) (cond (string=? s "if") 30 (string=? s "i64-shift-left") 16 (string=? s "i64-shift-right") 17
                       (string=? s "i32-wrap") 19 (string=? s "i32-wrapping-add") 21
                       (string=? s "i32-wrapping-mul") 22 (string=? s "i32-xor") 23
-                      (string=? s "i32-shift-left") 24 (string=? s "i32-shift-right") 25 :else 0)
+                      (string=? s "i32-shift-left") 24 (string=? s "i32-shift-right") 25
+                      (and (> n 8) (= (string-code-point-at s 4) 116)) (float-op-code s) :else 0)
+      (= c 102) (if (and (> n 4) (= (string-code-point-at s 3) 45)) (float-op-code s) 0)
       :else 0)))
 
 (defn- ported-op? [s :string] :bool (> (op-code s) 0))
@@ -328,6 +378,7 @@
         (= k :bool) (bool-word? v)
         (= k :string) (= 4 (kv/tag-of v))
         (= k :bytes) (= 7 (kv/tag-of v))
+        (or (= k :f64) (= k :f32)) (= 3 (kv/tag-of v))
         (= k :vector-i64) (= 9 (kv/tag-of v))
         (= k :option-i64) (= 14 (kv/tag-of v))
         (= k :result-i64) (= 15 (kv/tag-of v))
@@ -891,6 +942,145 @@
     (let [b (bytes-of-v xs 0)]
       (r-val (kv/vector-value (bytes->items b 0 (bytes-count b) (kv/no-values))) fuel))))
 
+
+;; ---- f64 / f32 (120-169): a float Value is tag 3 with n = the IEEE bits (f32: signed i32 bits) ----
+;;   120+k f64-{from-bits to-bits add sub mul div min max neg abs sqrt eq lt le gt ge unordered}
+;;   140+k the same for f32
+;;   160 i64-to-f64-checked 161 i64-to-f64-rounded 162 f64-to-i64-checked 163 f64-to-i64-truncating
+;;   164 f64-to-f32-rounded 165 f32-to-f64-exact 166 i64-to-f32-checked 167 i64-to-f32-rounded
+;;   168 f32-to-i64-checked 169 f32-to-i64-truncating
+;; Conversions that the host answers with an untyped error have no oracle outcome; they are
+;; answered as the named traps below.
+
+(defn- fl-kind [op :i64] :i64 (if (< op 140) 64 (if (< op 160) 32 0)))
+
+(defn- two-pow-63 [] :f64 (f64-from-bits 4890909195324358656))
+
+(defn- neg-two-pow-63 [] :f64 (f64-neg (two-pow-63)))
+
+(defn- fw [v [:ref :kir/v]] :f64 (f64-from-bits (kv/n-of v)))
+(defn- fx [v [:ref :kir/v]] :f32 (f32-from-bits (kv/n-of v)))
+
+(defn- f64-res [x :f64 fuel :i64] [:ref :kir.interp/res] (r-val (kv/f64-value (f64-to-bits x)) fuel))
+(defn- f32-res [x :f32 fuel :i64] [:ref :kir.interp/res] (r-val (kv/f64-value (f32-to-bits x)) fuel))
+(defn- bool-res [b :bool fuel :i64] [:ref :kir.interp/res] (r-val (kv/bool-value b) fuel))
+
+(defn- f64-finite? [x :f64] :bool (f64-eq (f64-sub x x) (f64-from-bits 0)))
+
+(defn- f64-in-i64? [x :f64] :bool
+  (and (f64-ge x (neg-two-pow-63)) (f64-lt x (two-pow-63))))
+
+;; x finite and inside the i64 range: truncation is defined
+(defn- f64-truncatable? [x :f64] :bool (and (f64-finite? x) (f64-in-i64? x)))
+
+(defn- f64-integral? [x :f64] :bool
+  (f64-eq (i64-to-f64-rounded (f64-to-i64-truncating x)) x))
+
+(defn- i64-exact-f64? [n :i64 r :f64] :bool
+  (and (f64-lt r (two-pow-63)) (= (f64-to-i64-truncating r) n)))
+
+;; arity and operand tags. 0 bits-in (i64), 1 float in, 2 two floats, 3 one i64
+(defn- fl-shape [op :i64] :i64
+  (let [k (if (< op 160) (rem op 20) op)]
+    (cond
+      (< op 160)
+      (cond (= k 0) 3
+            (or (= k 1) (or (= k 8) (or (= k 9) (= k 10)))) 1
+            :else 2)
+      (or (= op 160) (or (= op 161) (or (= op 166) (= op 167)))) 3
+      :else 1)))
+
+(defn- fl-tags-ok? [shape :i64 xs [:list [:ref :kir/v]]] :bool
+  (cond
+    (= shape 3) (i64? (arg-v xs 0))
+    (= shape 1) (= 3 (kv/tag-of (arg-v xs 0)))
+    :else (and (= 3 (kv/tag-of (arg-v xs 0))) (= 3 (kv/tag-of (arg-v xs 1))))))
+
+(defn- ev-f64-op [k :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [a (fw (arg-v xs 0))]
+    (cond
+      (= k 0) (f64-res (f64-from-bits (arg-n xs 0)) fuel)
+      (= k 1) (int-val (f64-to-bits a) fuel)
+      (= k 8) (f64-res (f64-neg a) fuel)
+      (= k 9) (f64-res (f64-abs a) fuel)
+      (= k 10) (f64-res (f64-sqrt a) fuel)
+      :else
+      (let [b (fw (arg-v xs 1))]
+        (cond
+          (= k 2) (f64-res (f64-add a b) fuel)
+          (= k 3) (f64-res (f64-sub a b) fuel)
+          (= k 4) (f64-res (f64-mul a b) fuel)
+          (= k 5) (f64-res (f64-div a b) fuel)
+          (= k 6) (f64-res (f64-min a b) fuel)
+          (= k 7) (f64-res (f64-max a b) fuel)
+          (= k 11) (bool-res (f64-eq a b) fuel)
+          (= k 12) (bool-res (f64-lt a b) fuel)
+          (= k 13) (bool-res (f64-le a b) fuel)
+          (= k 14) (bool-res (f64-gt a b) fuel)
+          (= k 15) (bool-res (f64-ge a b) fuel)
+          :else (bool-res (f64-unordered a b) fuel))))))
+
+(defn- ev-f32-op [k :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (if (and (= k 0) (or (< (arg-n xs 0) (- 0 2147483648)) (> (arg-n xs 0) 2147483647)))
+    (r-trap fuel "f32-bit-pattern-out-of-range")
+    (if (= k 0)
+      (f32-res (f32-from-bits (arg-n xs 0)) fuel)
+      (let [a (fx (arg-v xs 0))]
+        (cond
+          (= k 1) (int-val (f32-to-bits a) fuel)
+          (= k 8) (f32-res (f32-neg a) fuel)
+          (= k 9) (f32-res (f32-abs a) fuel)
+          (= k 10) (f32-res (f32-sqrt a) fuel)
+          :else
+          (let [b (fx (arg-v xs 1))]
+            (cond
+              (= k 2) (f32-res (f32-add a b) fuel)
+              (= k 3) (f32-res (f32-sub a b) fuel)
+              (= k 4) (f32-res (f32-mul a b) fuel)
+              (= k 5) (f32-res (f32-div a b) fuel)
+              (= k 6) (f32-res (f32-min a b) fuel)
+              (= k 7) (f32-res (f32-max a b) fuel)
+              (= k 11) (bool-res (f32-eq a b) fuel)
+              (= k 12) (bool-res (f32-lt a b) fuel)
+              (= k 13) (bool-res (f32-le a b) fuel)
+              (= k 14) (bool-res (f32-gt a b) fuel)
+              (= k 15) (bool-res (f32-ge a b) fuel)
+              :else (bool-res (f32-unordered a b) fuel))))))))
+
+;; f64 -> i64 after the host's conversion contract (finite, in range, and integral when checked)
+(defn- ev-f64-to-i64 [x :f64 checked? :bool fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (not (f64-truncatable? x)) (r-trap fuel "f64-conversion-out-of-range")
+    (and checked? (not (f64-integral? x))) (r-trap fuel "f64-not-integral")
+    :else (int-val (f64-to-i64-truncating x) fuel)))
+
+(defn- ev-float-conv [op :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (= op 160)
+    (let [n (arg-n xs 0) r (i64-to-f64-rounded n)]
+      (if (i64-exact-f64? n r) (f64-res r fuel) (r-trap fuel "i64-not-exact-f64")))
+    (= op 161) (f64-res (i64-to-f64-rounded (arg-n xs 0)) fuel)
+    (= op 162) (ev-f64-to-i64 (fw (arg-v xs 0)) true fuel)
+    (= op 163) (ev-f64-to-i64 (fw (arg-v xs 0)) false fuel)
+    (= op 164) (f32-res (f64-to-f32-rounded (fw (arg-v xs 0))) fuel)
+    (= op 165) (f64-res (f32-to-f64-exact (fx (arg-v xs 0))) fuel)
+    (= op 166)
+    (let [n (arg-n xs 0) r (i64-to-f32-rounded n)]
+      (if (i64-exact-f64? n (f32-to-f64-exact r)) (f32-res r fuel) (r-trap fuel "i64-not-exact-f32")))
+    (= op 167) (f32-res (i64-to-f32-rounded (arg-n xs 0)) fuel)
+    (= op 168) (ev-f64-to-i64 (f32-to-f64-exact (fx (arg-v xs 0))) true fuel)
+    :else (ev-f64-to-i64 (f32-to-f64-exact (fx (arg-v xs 0))) false fuel)))
+
+(defn- ev-float [op :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [shape (fl-shape op)
+        want (if (= shape 2) 2 1)]
+    (cond
+      (not (= want (vector-count xs))) (r-trap fuel "arity-mismatch")
+      (not (fl-tags-ok? shape xs)) (mismatch fuel)
+      (>= op 160) (ev-float-conv op xs fuel)
+      (< op 140) (ev-f64-op (- op 120) xs fuel)
+      :else (ev-f32-op (- op 140) xs fuel))))
+
 ;; ---- calls ----
 
 (defn- loop-helper-name? [s :string] :bool
@@ -986,6 +1176,12 @@
       ar
       (ev-bytes op (kv/kids-of (res-value ar)) (res-fuel ar)))))
 
+(defn- ev-float-call [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (let [ar (ev-args form env cx fuel)]
+    (if (not (= 0 (res-kind ar)))
+      ar
+      (ev-float op (kv/kids-of (res-value ar)) (res-fuel ar)))))
+
 (defn- ev-list [form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
   (let [head (form/first-of form)]
     (if (not (form/is-symbol? head))
@@ -1001,6 +1197,7 @@
               t))
           (= op 31) (ev-do-from form 1 env cx fuel)
           (= op 32) (ev (form/nth-of form 1) env cx fuel)
+          (>= op 120) (ev-float-call op form env cx fuel)
           (>= op 100) (ev-bytes-call op form env cx fuel)
           (>= op 60) (ev-agg op form env cx fuel)
           (> op 0) (ev-builtin op form env cx fuel)
@@ -1097,7 +1294,7 @@
 (defn- desc-ok? [ty [:ref :form/r]] :bool
   (if (form/is-keyword? ty)
     (let [k (form/keyword-value ty)]
-      (or (= k :i64) (or (= k :bool) (or (= k :string) (or (= k :bytes) (or (= k :vector-i64) (or (= k :option-i64) (= k :result-i64))))))))
+      (or (= k :i64) (or (= k :bool) (or (= k :string) (or (= k :bytes) (or (= k :f64) (or (= k :f32) (or (= k :vector-i64) (or (= k :option-i64) (= k :result-i64))))))))))
     (let [h (desc-head ty)
           n (form/count-of ty)]
       (cond
