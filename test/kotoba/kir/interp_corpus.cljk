@@ -1,0 +1,246 @@
+(ns kotoba.kir.interp-corpus
+  "Shared by interp_diff and interp_lower_diff: EDN of a host value, the host oracle
+  outcome of a module, and the corpus (sema test strings, generated programs,
+  hand-written probes). Run with the test directory on the classpath."
+  (:require ["node:fs" :as fs]
+            [cljs.reader]
+            [clojure.string :as str]
+            [kotoba.sema :as sema]
+            [kotoba.kir :as kir]))
+
+(defn ->edn [x]
+  (cond
+    (nil? x) "nil"
+    (boolean? x) (str x)
+    (integer? x) (str x)
+    (and (exists? js/BigInt) (= js/BigInt (.-constructor x))) (str x)
+    (string? x) (pr-str x)
+    (keyword? x) (str x)
+    (symbol? x) (str x)
+    (seq? x) (str "(" (str/join " " (map ->edn x)) ")")
+    (vector? x) (str "[" (str/join " " (map ->edn x)) "]")
+    (set? x) (str "#{" (str/join " " (map ->edn x)) "}")
+    (map? x) (str "{" (str/join " " (mapcat (fn [[k v]] [(->edn k) (->edn v)]) x)) "}")
+    :else (throw (ex-info "no-edn" {:x (pr-str x)}))))
+
+;; ---- host side ----
+
+(defn trap-name [e]
+  (loop [x e]
+    (when x
+      (let [t (:trap (ex-data x))]
+        (cond t (subs (str t) 1)
+              :else (recur (.-cause x)))))))
+
+(defn fmt-value
+  "V:<hi>:<lo> (arithmetic high word, unsigned low word): the Kotoba route cannot
+  print an i64 minimum with string-from-i64, so values are compared in halves."
+  [v]
+  (if (boolean? v)
+    (str "B:" v)
+    (let [b (js/BigInt v)
+          lo (js/BigInt.asUintN 32 b)
+          hi (/ (- b lo) (js/BigInt 4294967296))]
+      (str "V:" hi ":" lo))))
+
+(defn host-outcome
+  "V:/B:/T: for a module host `lower` oracles, nil when it does not (or rejects)."
+  [hir fuel frames]
+  (try
+    (let [r (kir/lower hir {:oracle-fuel fuel :oracle-frames frames})]
+      (cond (some? (:oracle-value r)) (fmt-value (:oracle-value r))
+            (:oracle-inconclusive r) (str "T:" (subs (str (:oracle-inconclusive r)) 1))
+            :else nil))
+    (catch :default e
+      (when-let [t (trap-name e)] (str "T:" t)))))
+
+(def ported-ops
+  '#{let if do arena-scope bool-not + - * quot bit-xor bit-and bit-or min max = < > <= >=
+     bit-not i64-shift-left i64-shift-right u64-shift-right i32-wrap u32-wrap i32-wrapping-add
+     i32-wrapping-mul i32-xor i32-shift-left i32-shift-right u32-shift-right xorshift32})
+
+(defn heads [body]
+  (->> (tree-seq coll? seq body)
+       (filter #(and (seq? %) (symbol? (first %))))
+       (map first)))
+
+(defn unported-heads [hir]
+  (let [fns (set (map :name (:functions hir)))]
+    (->> (:functions hir) (mapcat (comp heads :body))
+         (remove #(or (ported-ops %) (fns %))))))
+
+(defn slim
+  "Only what the interpreter reads: the entry and each function's name, parameters,
+  types, result, body and refinements (a smaller text to parse on the Kotoba side)."
+  [hir]
+  {:entry (:entry hir)
+   :functions (mapv #(select-keys % [:name :params :param-types :result :body :closure-param-indexes
+                                     :i64-pair-chain-param-indexes :closure-result?])
+                    (:functions hir))})
+
+(defn oracle-module? [hir]
+  (and (:entry hir) (contains? #{:i64 :bool} (:result hir)) (every? #{:state :abort} (:effects hir))))
+
+;; ---- corpus ----
+
+(defn strings-in [file]
+  (let [text (.readFileSync fs file "utf8")]
+    (keep (fn [m] (try (js/JSON.parse (str "\"" (second m) "\"")) (catch :default _ nil)))
+          (re-seq #"\"((?:[^\"\\\\]|\\\\.)*)\"" text))))
+
+(defn try-analyze [s]
+  (or (try (sema/analyze s) (catch :default _ nil))
+      (try (sema/analyze (str s "\n(defn main [] :i64 0)")) (catch :default _ nil))))
+
+(defn corpus-hirs [dirs]
+  (let [files (mapcat (fn [d] (->> (.readdirSync fs d)
+                                   (filter #(str/ends-with? % ".cljk"))
+                                   (map #(str d "/" %))))
+                      dirs)
+        cands (->> files (mapcat strings-in)
+                   (filter #(and (str/starts-with? (str/triml %) "(") (re-find #"\(defn?\b" %)))
+                   distinct)]
+    (keep try-analyze cands)))
+
+;; ---- generated programs ----
+
+(defn make-rng [seed]
+  (let [s (atom (bit-or 1 (js/Math.abs (or seed 1))))]
+    (fn [n] ;; xorshift on 31 bits, plenty for a fuzzer
+      (let [x @s
+            x (bit-and (bit-xor x (bit-shift-left x 13)) 0x7fffffff)
+            x (bit-xor x (bit-shift-right x 17))
+            x (bit-and (bit-xor x (bit-shift-left x 5)) 0x7fffffff)]
+        (reset! s (if (zero? x) 12345 x))
+        (mod @s n)))))
+
+(def lits ["0" "1" "2" "3" "7" "10" "31" "32" "63" "64" "-1" "-2" "100" "255" "4294967295" "4294967296"
+           "9223372036854775807" "-9223372036854775807" "1000003"])
+
+(defn gen-expr [rnd depth vars fns]
+  (let [pick (fn [xs] (nth xs (rnd (count xs))))
+        atom-expr (fn [] (if (and (seq vars) (< (rnd 10) 7)) (pick vars) (pick lits)))]
+    (if (<= depth 0)
+      (atom-expr)
+      (let [sub #(gen-expr rnd (dec depth) vars fns)
+            c (rnd 22)]
+        (case c
+          (0 1 2) (str "(" (pick ["+" "-" "*"]) " " (sub) " " (sub) ")")
+          3 (str "(" (pick ["bit-and" "bit-or" "bit-xor" "min" "max"]) " " (sub) " " (sub) ")")
+          4 (str "(quot " (sub) " " (sub) ")")
+          5 (str "(rem " (sub) " " (sub) ")")
+          6 (str "(" (pick ["i64-shift-left" "i64-shift-right" "u64-shift-right"]) " " (sub) " "
+                 (if (< (rnd 4) 3) (str (rnd 64)) (sub)) ")")
+          7 (str "(if " (str "(" (pick ["<" ">" "<=" ">=" "="]) " " (sub) " " (sub) ")") " " (sub) " " (sub) ")")
+          8 (let [v (str "v" (rnd 3))]
+              (str "(let [" v " " (sub) "] " (gen-expr rnd (dec depth) (conj vars v) fns) ")"))
+          9 (str "(bit-not " (sub) ")")
+          10 (if (seq fns)
+               (let [[f n] (pick fns)]
+                 (str "(" f " " (str/join " " (repeatedly n sub)) ")"))
+               (atom-expr))
+          11 (str "(when-not (< " (sub) " " (sub) ") " (sub) ")")
+          12 (str "(cond (< " (sub) " " (sub) ") " (sub) " (> " (sub) " 5) " (sub) " :else " (sub) ")")
+          13 (str "(mod " (sub) " " (sub) ")")
+          14 (str "(inc " (sub) ")")
+          15 (str "(dec " (sub) ")")
+          16 (str "(if (zero? " (sub) ") " (sub) " " (sub) ")")
+          17 (str "(if (and (< " (sub) " " (sub) ") (> " (sub) " 0)) " (sub) " " (sub) ")")
+          18 (str "(if (or (< " (sub) " 3) (even? " (sub) ")) " (sub) " " (sub) ")")
+          19 (str "(loop [i 0 acc " (sub) "] (if (< i " (inc (rnd 6)) ") (recur (inc i) (+ acc (* i " (sub) "))) acc))")
+          20 (str "(" (pick ["i32-wrap" "u32-wrap" "xorshift32"]) " " (sub) ")")
+          21 (str "(" (pick ["i32-wrapping-add" "i32-wrapping-mul" "i32-xor" "i32-shift-left" "i32-shift-right" "u32-shift-right"]) " "
+                  (sub) " " (if (< (rnd 3) 2) (str (rnd 32)) (sub)) ")"))))))
+
+(defn gen-program [rnd]
+  (let [nf (inc (rnd 4))
+        defs (loop [i 0 fns [] out []]
+               (if (= i nf)
+                 [fns out]
+                 (let [arity (inc (rnd 3))
+                       ps (mapv #(str "p" %) (range arity))
+                       body (gen-expr rnd (+ 1 (rnd 4)) ps fns)
+                       name (str "f" i)]
+                   (recur (inc i) (conj fns [name arity])
+                          (conj out (str "(defn " name " [" (str/join " " (map #(str % " :i64") ps)) "] :i64 " body ")"))))))
+        [fns out] defs
+        bool? (zero? (rnd 5))
+        call (fn [] (let [[f n] (nth fns (rnd (count fns)))]
+                      (str "(" f " " (str/join " " (repeatedly n #(nth lits (rnd (count lits))))) ")")))
+        main (if bool?
+               (str "(defn main [] :bool (" (nth ["<" ">" "=" "<=" ">="] (rnd 5)) " " (call) " " (call) "))")
+               (str "(defn main [] :i64 " (if (zero? (rnd 3)) (str "(+ " (call) " " (call) ")") (call)) ")"))]
+    (str (str/join "\n" out) "\n" main)))
+
+(def hand-src
+  ["(defn main [] :i64 (+ 1 2))"
+   "(defn main [] :i64 (quot 7 0))"
+   "(defn main [] :i64 (quot -9223372036854775808 -1))"
+   "(defn main [] :i64 (rem 9 0))"
+   "(defn main [] :i64 (i64-shift-left 1 64))"
+   "(defn main [] :i64 (i64-shift-right -8 1))"
+   "(defn main [] :i64 (u64-shift-right -8 1))"
+   "(defn main [] :i64 (i64-shift-left 1 -1))"
+   "(defn main [] :i64 (i32-shift-left 1 32))"
+   "(defn main [] :i64 (i32-shift-left 1 31))"
+   "(defn main [] :i64 (u32-shift-right -1 4))"
+   "(defn main [] :i64 (xorshift32 2463534242))"
+   "(defn main [] :i64 (i32-wrapping-mul 65536 65536))"
+   "(defn main [] :i64 (i32-wrapping-add 2147483647 1))"
+   "(defn main [] :i64 (* 9223372036854775807 9223372036854775807))"
+   "(defn main [] :i64 (+ 9223372036854775807 1))"
+   "(defn main [] :i64 (- -9223372036854775807 2))"
+   "(defn main [] :i64 (- 5))"
+   "(defn main [] :i64 (min 3 -4))"
+   "(defn main [] :bool (< 1 2))"
+   "(defn main [] :bool (= 1 1))"
+   "(defn main [] :bool true)"
+   "(defn main [] :bool (not true))"
+   "(defn f [n :i64] :i64 (if (<= n 0) 0 (+ 1 (f (- n 1)))))\n(defn main [] :i64 (f 20))"
+   "(defn f [n :i64] :i64 (if (<= n 0) 0 (+ 1 (f (- n 1)))))\n(defn main [] :i64 (f 200))"
+   "(defn f [n :i64] :i64 (+ 1 (f (+ n 1))))\n(defn main [] :i64 (f 0))"
+   "(defn f [n :i64] :i64 (if (<= n 0) 0 (+ 1 (g (- n 1)))))\n(defn g [n :i64] :i64 (f n))\n(defn main [] :i64 (f 12))"
+   "(defn sum [n :i64] :i64 (loop [i 0 acc 0] (if (> i n) acc (recur (+ i 1) (+ acc i)))))\n(defn main [] :i64 (sum 100))"
+   "(defn sum [n :i64] :i64 (loop [i 0 acc 0] (if (> i n) acc (recur (+ i 1) (+ acc i)))))\n(defn main [] :i64 (sum 1500))"
+   "(defn sum [n :i64] :i64 (loop [i 0 acc 0] (if (> i n) acc (recur (+ i 1) (+ acc i)))))\n(defn main [] :i64 (+ (sum 30) (sum 40)))"
+   "(defn spin [n :i64] :i64 (loop [i 0] (if (< i n) (recur (+ i 1)) i)))\n(defn main [] :i64 (spin 2000))"
+   "(defn fib [n :i64] :i64 (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))\n(defn main [] :i64 (fib 12))"
+   "(defn even2 [n :i64] :bool (if (= n 0) true (odd2 (- n 1))))\n(defn odd2 [n :i64] :bool (if (= n 0) false (even2 (- n 1))))\n(defn main [] :bool (even2 10))"
+   "(defn p [a :i64] :bool (> a 3))\n(defn main [] :i64 (if (p 5) 1 2))"
+   "(defn p [a :i64] :bool (> a 3))\n(defn main [] :bool (p 2))"
+   "(defn main [] :i64 (let [a 1 b (+ a 1) a (* b 10)] (+ a b)))"
+   "(defn main [] :i64 (let [x 5] (do (+ x 1) (* x 2))))"
+   "(defn gcd [a :i64 b :i64] :i64 (if (= b 0) a (gcd b (rem a b))))\n(defn main [] :i64 (gcd 1071 462))"
+   "(defn collatz [n :i64] :i64 (loop [x n steps 0] (if (= x 1) steps (recur (if (= (rem x 2) 0) (quot x 2) (+ (* 3 x) 1)) (+ steps 1)))))\n(defn main [] :i64 (collatz 27))"])
+
+(defn hirs-of-sources [srcs]
+  (keep try-analyze srcs))
+
+
+(defn candidates
+  "The deterministic list of (module, budget) cases: sema corpus, generated, hand."
+  [dirs]
+  (let [corpus (vec (if (= dirs ["none"]) [] (corpus-hirs dirs)))
+        rnd (make-rng (js/parseInt (or (.-DIFF_SEED js/process.env) "20260930")))
+        gen-srcs (vec (repeatedly (js/parseInt (or (.-DIFF_GEN js/process.env) "400")) #(gen-program rnd)))
+        gen (vec (hirs-of-sources gen-srcs))
+        hand (vec (hirs-of-sources hand-src))
+        _ (println "corpus" (count corpus) "generated" (count gen) "/" (count gen-srcs) "hand" (count hand) "/" (count hand-src))
+        groups [["sema" corpus] ["gen" gen] ["hand" hand]]
+        budgets (if-let [f (.-DIFF_FUEL js/process.env)] [[(js/parseInt f) 32] [60 5] [50 32]] [[100000 32] [60 5] [50 32]])]
+    (vec (for [[g hs] groups
+               h hs
+               :when (oracle-module? h)
+               :let [edn (try (->edn (slim h)) (catch :default _ nil))]
+               :when (and edn (< (count edn) 12000))
+               [fuel frames] budgets]
+           {:group g :fuel fuel :frames frames :edn edn :hir h}))))
+
+
+(defn stalled-edns
+  "The EDN of every candidate whose host outcome stalled (a :begin row with no result)
+  in the cache tools/interp_diff.sh wrote; a module with such a case is excluded."
+  [cands cache]
+  (let [rows (->> (str/split-lines (.readFileSync fs cache "utf8")) (remove empty?) (map cljs.reader/read-string))
+        done (set (keep (fn [[i v]] (when-not (= v :begin) i)) rows))]
+    (set (keep (fn [[i v]] (when (and (= v :begin) (not (done i))) (:edn (nth cands i)))) rows))))
