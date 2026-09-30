@@ -1,5 +1,5 @@
 (ns kotoba.kir.value
-  {:kotoba/export #?(:kotoba [adt-depth-limit adt-node-limit bounded-string! boundary-traversal-node-limit boundary-traversal-byte-limit bytes-value-byte-limit canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit document-container-item-limit document-depth-limit document-node-limit document-utf8-byte-limit heterogeneous-vector-item-limit keyword-value-byte-limit map-entry-limit record-field-limit string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit typed-map-entry-limit typed-set-item-limit utf8-byte-count! variant-case-limit vector-item-limit vector-literal-item-limit] :default [utf8-invalid-traps utf8-invalid-at utf8-decode-canonical bytes-item-out-of-range-at bytes-from-items bytes-items bytes-slice-of utf8-find-byte! utf8-append-range! utf8-index-of-from! utf8-compare-lines! utf8-compare! fold-ascii! utf8-find-blank! utf8-skip-blank! adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! shallow-typed-value! operand-tag? boundary-traversal-node-limit boundary-traversal-byte-limit bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit])}
+  {:kotoba/export #?(:kotoba [adt-depth-limit adt-node-limit boundary-traversal-byte-limit boundary-traversal-node-limit bounded-keyword! bounded-string! bytes-byte-count bytes-from-items bytes-items bytes-slice-of bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit document-container-item-limit document-depth-limit document-node-limit document-utf8-byte-limit empty-bytes f32-to-i64-bits f32-value? f64-to-i64-bits f64-value? fold-ascii! fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 keyword-value-byte-limit map-entry-limit record-field-limit string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit typed-map-entry-limit typed-set-item-limit upper-case! utf8-append-range! utf8-byte-count! utf8-code-point-at! utf8-compare! utf8-compare-lines! utf8-decode-canonical utf8-find-blank! utf8-find-byte! utf8-index-of! utf8-index-of-from! utf8-skip-blank! utf8-substring! variant-case-limit vector-item-limit vector-literal-item-limit] :default [utf8-invalid-traps utf8-invalid-at utf8-decode-canonical bytes-item-out-of-range-at bytes-from-items bytes-items bytes-slice-of utf8-find-byte! utf8-append-range! utf8-index-of-from! utf8-compare-lines! utf8-compare! fold-ascii! utf8-find-blank! utf8-skip-blank! adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! shallow-typed-value! operand-tag? boundary-traversal-node-limit boundary-traversal-byte-limit bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit])}
   (:require [kotoba.lang.text :as str]
             #?@(:cljs [[sha2.core :as sha2]
                        [kotoba.kir.cljs-i64 :as i64]]))
@@ -233,15 +233,21 @@
    :default
    (def document-utf8-byte-limit 65536))
 
-#?(:kotoba nil :default (defn f64-value? [value]
+#?(:kotoba
+   (defn f64-value? [value :f64] :bool true)
+   :default (defn f64-value? [value]
   #?(:clj (instance? Double value)
      :cljs (number? value))))
 
-#?(:kotoba nil :default (defn f32-value? [value]
+#?(:kotoba
+   (defn f32-value? [value :f32] :bool true)
+   :default (defn f32-value? [value]
   #?(:clj (instance? Float value)
      :cljs (and (number? value) (js/Object.is (js/Math.fround value) value)))))
 
-#?(:kotoba nil :default (defn f32-to-i64-bits [value]
+#?(:kotoba
+   (defn f32-to-i64-bits [value :f32] :i64 (f32-to-bits value))
+   :default (defn f32-to-i64-bits [value]
   (when-not (f32-value? value)
     (throw (ex-info "value is not f32" {:phase :value :value value})))
   #?(:clj (long (Float/floatToIntBits ^float value))
@@ -252,7 +258,9 @@
                (.setFloat32 view 0 value true)
                (js/BigInt (.getInt32 view 0 true)))))))
 
-#?(:kotoba nil :default (defn i64-bits-to-f32 [bits]
+#?(:kotoba
+   (defn i64-bits-to-f32 [bits :i64] :f32 (f32-from-bits bits))
+   :default (defn i64-bits-to-f32 [bits]
   #?(:clj (do
             (when-not (and (integer? bits) (<= Integer/MIN_VALUE bits Integer/MAX_VALUE))
               (throw (ex-info "f32 bit pattern is not signed i32" {:phase :value :value bits})))
@@ -296,7 +304,9 @@
                       {:phase :value :conversion :i64-to-f32-checked})))
     result)))
 
-#?(:kotoba nil :default (defn f64-to-i64-bits [value]
+#?(:kotoba
+   (defn f64-to-i64-bits [value :f64] :i64 (f64-to-bits value))
+   :default (defn f64-to-i64-bits [value]
   (when-not (f64-value? value)
     (throw (ex-info "value is not f64" {:phase :value :value value})))
   #?(:clj (Double/doubleToLongBits ^double value)
@@ -305,7 +315,9 @@
              (.setFloat64 view 0 value true)
              (.getBigInt64 view 0 true)))))
 
-#?(:kotoba nil :default (defn i64-bits-to-f64 [bits]
+#?(:kotoba
+   (defn i64-bits-to-f64 [bits :i64] :f64 (f64-from-bits bits))
+   :default (defn i64-bits-to-f64 [bits]
   #?(:clj (do
             (when-not (and (integer? bits) (<= Long/MIN_VALUE bits Long/MAX_VALUE))
               (throw (ex-info "f64 bit pattern is not i64" {:phase :value :value bits})))
@@ -427,14 +439,18 @@
                       {:phase :value :bytes bytes :limit limit})))
     value))
 
-#?(:kotoba nil :default (defn bytes-value?
+#?(:kotoba
+   (defn bytes-value? [value :bytes] :bool true)
+   :default (defn bytes-value?
   "Host representation of kit/runtime `:bytes`: a raw byte array on JVM,
   a `Uint8Array` on cljs/nbb. Not a string — UTF-8 is not assumed."
   [value]
   #?(:clj (bytes? value)
      :cljs (instance? js/Uint8Array value))))
 
-#?(:kotoba nil :default (defn bytes-byte-count
+#?(:kotoba
+   (defn bytes-byte-count [value :bytes] :i64 (bytes-count value))
+   :default (defn bytes-byte-count
   "Length in bytes of a host `:bytes` value. Throws if not bytes."
   [value]
   (when-not (bytes-value? value)
@@ -536,7 +552,9 @@
                                   :else (recur (inc j))))]
                   (if bad bad (recur (+ i k 1)))))))))))))
 
-#?(:kotoba nil :default (defn utf8-decode-canonical
+#?(:kotoba
+   (defn utf8-decode-canonical [value :bytes] :string (string-from-utf8 value))
+   :default (defn utf8-decode-canonical
   "The string whose UTF-8 bytes are exactly B. Callers establish
   `(nil? (utf8-invalid-at b))` first; the host decoder is still asked to fail
   rather than replace, so a caller that skipped the check gets an error, not
@@ -559,7 +577,9 @@
           (recur (inc i))
           i))))))
 
-#?(:kotoba nil :default (defn bytes-from-items
+#?(:kotoba
+   (defn bytes-from-items [items :vector-i64] :bytes (bytes-from-vector-i64 items))
+   :default (defn bytes-from-items
   "A fresh host `:bytes` value holding ITEMS (i64 values already known to be
   in [0,255])."
   [items]
@@ -568,14 +588,18 @@
              (dotimes [i (count items)] (aset out i (js/Number (nth items i))))
              out))))
 
-#?(:kotoba nil :default (defn bytes-items
+#?(:kotoba
+   (defn bytes-items [value :bytes] :vector-i64 (vector-i64-from-bytes value))
+   :default (defn bytes-items
   "The bytes of the host `:bytes` value B as a vector of host integers."
   [b]
   (let [n (bytes-byte-count b)]
     (loop [i 0 out (transient [])]
       (if (< i n) (recur (inc i) (conj! out (host-byte-at b i))) (persistent! out))))))
 
-#?(:kotoba nil :default (defn bytes-slice-of
+#?(:kotoba
+   (defn bytes-slice-of [value :bytes start :i64 end :i64] :bytes (bytes-slice value start end))
+   :default (defn bytes-slice-of
   "Bytes [START, END) of B as a fresh host value (bounds established by the
   caller)."
   [b start end]
@@ -750,7 +774,9 @@
   [chunks]
   (make-bytes-stream (concat-bytes chunks))))
 
-#?(:kotoba nil :default (defn empty-bytes
+#?(:kotoba
+   (defn empty-bytes [] :bytes (bytes-empty))
+   :default (defn empty-bytes
   "Construct the canonical empty `:bytes` value for the current host."
   []
   #?(:clj (byte-array 0) :cljs (js/Uint8Array. 0))))
@@ -1023,7 +1049,9 @@
                   ((if inclusive-end? <= <) offset* length*))
          (js/Number offset*))))))
 
-#?(:kotoba nil :default (defn utf8-substring!
+#?(:kotoba
+   (defn utf8-substring! [value :string start :i64 end :i64] :string (string-substring value start end))
+   :default (defn utf8-substring!
   "Checked UTF-8 byte-offset substring. Both offsets must be code-point
   boundaries; malformed UTF-16 is rejected by utf8-byte-count! first."
   [value start end]
@@ -1051,7 +1079,9 @@
           (recur (+ index units) (+ byte-index bytes)
                  (assoc boundaries (+ byte-index bytes) (+ index units)))))))))
 
-#?(:kotoba nil :default (defn utf8-index-of!
+#?(:kotoba
+   (defn utf8-index-of! [value :string needle :string] :i64 (string-index-of value needle))
+   :default (defn utf8-index-of!
   "First UTF-8 BYTE offset of NEEDLE in VALUE, -1 when absent. The empty
   needle is refused by the caller (KIR traps on it), mirroring
   :empty-string-search-needle. Strings are CLJC strings here; the byte
@@ -1125,7 +1155,9 @@
         [2 4 (+ 0x10000 (bit-shift-left (- unit 0xd800) 10) (- next-unit 0xdc00))])
       :else [1 3 unit]))))
 
-#?(:kotoba nil :default (defn utf8-compare!
+#?(:kotoba
+   (defn utf8-compare! [a :string b :string] :i64 (string-compare a b))
+   :default (defn utf8-compare!
   "-1, 0 or 1: A before, equal to, or after B in BYTE order. Code point order
   and UTF-8 byte order agree, so this walks code points; a proper prefix is
   less than what extends it. Both operands are validated as canonical UTF-8
@@ -1147,7 +1179,9 @@
             (> ca cb) 1
             :else (recur (+ i ua) (+ j ub)))))))))
 
-#?(:kotoba nil :default (defn fold-ascii!
+#?(:kotoba
+   (defn fold-ascii! [value :string] :string (string-fold-ascii value))
+   :default (defn fold-ascii!
   "VALUE with the ASCII letters A-Z lowered and every other code point kept.
   One byte to one byte, so every UTF-8 offset into the result is the same
   offset into VALUE -- which is what lets a search over the folded text
@@ -1189,14 +1223,18 @@
             (wanted (blank-code-point? code-point)) byte-index
             :else (recur (+ index units) (+ byte-index bytes)))))))))
 
-#?(:kotoba nil :default (defn utf8-find-blank!
+#?(:kotoba
+   (defn utf8-find-blank! [value :string from :i64] :i64 (string-find-blank value from))
+   :default (defn utf8-find-blank!
   "The first byte offset at or after FROM holding a blank -- space, tab,
   newline, vertical tab, form feed or carriage return, the C locale's
   isspace -- or -1."
   [value from]
   (utf8-scan-blank! value from true? -1)))
 
-#?(:kotoba nil :default (defn utf8-skip-blank!
+#?(:kotoba
+   (defn utf8-skip-blank! [value :string from :i64] :i64 (string-skip-blank value from))
+   :default (defn utf8-skip-blank!
   "The first byte offset at or after FROM holding a NON-blank, or the byte
   length when the rest is blank."
   [value from]
@@ -1241,7 +1279,9 @@
       (let [[units bytes _] (code-point-units value i)]
         (recur (+ i units) (+ byte-index bytes)))))))
 
-#?(:kotoba nil :default (defn utf8-index-of-from!
+#?(:kotoba
+   (defn utf8-index-of-from! [value :string needle :string from :i64] :i64 (string-index-of-from value needle from))
+   :default (defn utf8-index-of-from!
   "First UTF-8 byte offset of NEEDLE in VALUE at or after byte offset FROM,
   absolute, or -1. FROM must be a code-point boundary in [0, byte-length]
   (the byte length itself answers -1 for a non-empty needle). The empty
@@ -1261,7 +1301,9 @@
               :cljs (.indexOf value "\n" start))]
     (subs value start (if (neg? nl) (count value) nl)))))
 
-#?(:kotoba nil :default (defn utf8-compare-lines!
+#?(:kotoba
+   (defn utf8-compare-lines! [a :string i :i64 b :string j :i64] :i64 (string-compare-lines a i b j))
+   :default (defn utf8-compare-lines!
   "-1, 0 or 1: the newline-terminated line of A starting at byte offset I
   before, equal to, or after the line of B starting at byte offset J, in
   byte order (utf8-compare!). Each line ends at the first newline at or
@@ -1279,7 +1321,9 @@
 ;; and a range append. Reference semantics here; context slots 336 / 344 on
 ;; native.
 
-#?(:kotoba nil :default (defn utf8-find-byte!
+#?(:kotoba
+   (defn utf8-find-byte! [value :string byte :i64 from :i64] :i64 (string-find-byte value byte from))
+   :default (defn utf8-find-byte!
   "First UTF-8 byte offset at or after FROM whose byte is B, or -1. B must be
   an ASCII byte (0-127) -- so a match is a code-point boundary; anything else
   traps. FROM must be a code-point boundary in [0, byte-length]."
@@ -1288,14 +1332,18 @@
     (throw (ex-info "byte search needle is not ASCII" {:phase :value :byte b})))
   (utf8-index-of-from! value (str (char b)) from)))
 
-#?(:kotoba nil :default (defn utf8-append-range!
+#?(:kotoba
+   (defn utf8-append-range! [acc :string value :string start :i64 end :i64] :string (string-append-range acc value start end))
+   :default (defn utf8-append-range!
   "ACC followed by the bytes [START, END) of VALUE -- what
   `(string-concat acc (string-substring value start end))` answers, without
   the view. START and END must be code-point boundaries with START <= END."
   [acc value start end]
   (str acc (utf8-substring! value start end))))
 
-#?(:kotoba nil :default (defn utf8-code-point-at!
+#?(:kotoba
+   (defn utf8-code-point-at! [value :string offset :i64] :i64 (string-code-point-at value offset))
+   :default (defn utf8-code-point-at!
   "Return the Unicode code point of the UTF-8 sequence that STARTS at BYTE-OFFSET
   (a UTF-8 byte offset into VALUE, same coordinate space as utf8-substring!'s
   offsets and string-byte-length). BYTE-OFFSET must be a code-point boundary in
@@ -1332,7 +1380,14 @@
                           {:phase :value :offset byte-offset}))
           :else (recur (+ index units) (+ byte-index bytes))))))))
 
-#?(:kotoba nil :default (defn bounded-keyword!
+#?(:kotoba
+   (defn bounded-keyword! [value :keyword limit :i64] :keyword
+     (let [bytes (+ 1 (utf8-byte-count! (keyword-name value)))]
+       (when (> bytes limit)
+         (throw (ex-info "keyword exceeds UTF-8 byte limit"
+                         {:phase :value :bytes bytes :limit limit})))
+       value))
+   :default (defn bounded-keyword!
   [value limit]
   (when-not (keyword? value)
     (throw (ex-info "value is not a keyword" {:phase :value :value value})))
@@ -1366,7 +1421,9 @@
 ;; claimed to agree on the full Unicode SpecialCasing table (Turkish `İ`/`ı`,
 ;; German `ß`, Lithuanian dot-retention, and similar locale/context-sensitive
 ;; exceptions are explicitly out of scope).
-#?(:kotoba nil :default (defn fold-case!
+#?(:kotoba
+   (defn fold-case! [value :string] :string (string-fold-case value))
+   :default (defn fold-case!
   [value]
   (when-not (string? value)
     (throw (ex-info "value is not a string" {:phase :value :value value})))
@@ -1383,7 +1440,9 @@
 ;; the full Unicode SpecialCasing table (Turkish `İ`/`ı`, German `ß`, Greek
 ;; final-sigma context, Lithuanian dot-retention) is explicitly out of scope,
 ;; exactly as for `fold-case!`.
-#?(:kotoba nil :default (defn upper-case!
+#?(:kotoba
+   (defn upper-case! [value :string] :string (string-upper value))
+   :default (defn upper-case!
   [value]
   (when-not (string? value)
     (throw (ex-info "value is not a string" {:phase :value :value value})))
