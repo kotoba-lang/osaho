@@ -75,3 +75,41 @@
     (is (= schemas (:schemas (kir/native-program kir*))))
     (is (not (contains? (kir/native-program (assoc kir* :schemas {:app/point [:record :app/point [[:x :i64]]]}))
                         :schemas)))))
+
+(deftest a-signature-reference-carries-its-table-into-the-native-program
+  ;; amu ADR 0353 floor :native-record-boundary: a declared, non-recursive
+  ;; record as a parameter or result. The oracle resolves the reference
+  ;; through the table; without it the artifact is refused as
+  ;; `:unknown-schema-reference`.
+  (let [point [:record :app/point [[:x :i64]]]
+        table {:app/point point}
+        x-of {:name 'x-of :params ['p] :param-types [[:ref :app/point]] :result :i64
+              :effects #{} :body (list 'record-get point 'p :x)}
+        make {:name 'make :params [] :param-types [] :result [:ref :app/point]
+              :effects #{} :body (list 'record-new point 7)}
+        kir* {:format :kotoba.kir/v4 :entry 'main :exports ['main]
+              :signature {:params [] :result :i64} :effects #{}
+              :schemas table :schema-identities {}}]
+    (testing "a reference parameter"
+      (let [program (kir/native-program
+                     (assoc kir* :functions [x-of {:name 'main :params [] :param-types [] :result :i64
+                                                   :effects #{} :body (list 'x-of (list 'record-new point 7))}]))]
+        (is (= table (:schemas program)))
+        (is (= "7" (str (kir/execute program 'main []))))))
+    (testing "a reference result"
+      (let [program (kir/native-program
+                     (assoc kir* :functions [make {:name 'main :params [] :param-types [] :result :i64
+                                                   :effects #{} :body (list 'record-get point (list 'make) :x)}]))]
+        (is (= table (:schemas program)))
+        (is (= "7" (str (kir/execute program 'main []))))))
+    (testing "refused without the table, as the oracle refused it before"
+      (is (= :unknown-schema-reference
+             (try (kir/execute (dissoc (kir/native-program (assoc kir* :functions [make {:name 'main :params [] :param-types [] :result :i64
+                                                                                         :effects #{} :body (list 'record-get point (list 'make) :x)}]))
+                                       :schemas)
+                               'main [])
+                  nil
+                  (catch #?(:clj Throwable :cljs :default) e
+                    (loop [x e]
+                      (or (:trap (ex-data x))
+                          (when-let [c (ex-cause x)] (recur c)))))))))))

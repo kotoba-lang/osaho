@@ -743,16 +743,33 @@
                 false)))]
     (boolean (and (map? table) (some reaches? (keys table))))))
 
+(defn- signature-schema-reference?
+  "True when some function's `:param-types` or `:result` names `[:ref q]` --
+  the one place a reference survives lowering (every body operation carries
+  its descriptor expanded)."
+  [functions]
+  (boolean
+   (some (fn [{:keys [param-types result]}]
+           (some #(and (vector? %) (= 2 (count %)) (= :ref (first %)))
+                 (mapcat #(tree-seq coll? seq %) (cond-> (vec param-types) result (conj result)))))
+         functions)))
+
 (defn native-program
   "The closed program a native artifact seals and its verifier re-executes.
 
-  `:schemas` joins it only for a RECURSIVE table. A recursive type cannot be
-  expanded into its signatures, so without the table the verifier's oracle
-  cannot resolve `[:ref q]` and refuses the artifact. A non-recursive table
-  is left out exactly as before, so no existing module's `:kir-sha256` moves."
+  `:schemas` joins it when the verifier's oracle needs it to resolve a
+  `[:ref q]`: for a RECURSIVE table, and whenever a function's signature
+  names a reference (a declared record crossing a function boundary, amu ADR
+  0353 floor :native-record-boundary). Without it the oracle traps
+  `:unknown-schema-reference` and the artifact is refused. A table no
+  signature reaches is left out exactly as before, so a module whose
+  references are all expanded into its bodies keeps its `:kir-sha256`."
   [kir]
   (cond-> (select-keys kir [:format :entry :exports :signature :effects :functions])
-    (recursive-schema-table? (:schemas kir)) (assoc :schemas (:schemas kir))))
+    (and (map? (:schemas kir))
+         (or (recursive-schema-table? (:schemas kir))
+             (signature-schema-reference? (:functions kir))))
+    (assoc :schemas (:schemas kir))))
 
 (def native-document-operation-arities
   "Document operations native admits (gap 2 of the selfhost foundation), with
