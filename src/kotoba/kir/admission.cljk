@@ -16,9 +16,313 @@
   policy's cap-id may be a bigint (this file's caller may parse
   `--policy policy.edn` via `kotoba.compiler.kotoba-reader`, the same
   reader `.kotoba` source itself uses) or a plain number, on `:cljs`."
-  [form]
-  #?(:clj (integer? form) :cljs (or (i64/bigint-value? form) (integer? form))))
+  [#?@(:kotoba [form :document] :default [form])]
+  #?@(:kotoba [:bool])
+  #?(:kotoba (integer? form)
+     :clj (integer? form)
+     :cljs (or (i64/bigint-value? form) (integer? form))))
 
+#?(:kotoba
+   (defn- g [m :document k :keyword] :document
+     (if (map? m) (get m k (document-null)) (document-null))))
+
+#?(:kotoba
+   (defn- kw? [d :document k :keyword] :bool
+     (document-equal? d (document-keyword k))))
+
+#?(:kotoba
+   (defn- policy-key-ok? [k :document] :bool
+     (or (kw? k :allow) (kw? k :abac) (kw? k :attributes)
+         (kw? k :information-flow) (kw? k :crypto-required?)
+         (kw? k :crypto-policy) (kw? k :crypto-envelope)
+         (kw? k :hardware-signing-required?)
+         (kw? k :hardware-signing-evidence))))
+
+#?(:kotoba
+   (defn- member? [xs :document x :document] :bool
+     (loop [i 0]
+       (if (>= i (document-count xs))
+         false
+         (if (document-equal? (nth xs i) x) true (recur (+ i 1)))))))
+
+;; A set of values in a document tree is a vector without duplicates.
+#?(:kotoba
+   (defn- add-distinct [acc :document x :document] :document
+     (if (member? acc x) acc (document-vector-conj acc x))))
+
+#?(:kotoba
+   (defn- distinct-of [xs :document] :document
+     (if (coll? xs)
+       (reduce add-distinct (document-vector) xs)
+       (document-vector))))
+
+;; the members of A that B lacks, in A's order
+#?(:kotoba
+   (defn- difference-of [a :document b :document] :document
+     (loop [i 0 acc (document-vector)]
+       (if (>= i (document-count a))
+         acc
+         (recur (+ i 1)
+                (if (member? b (nth a i)) acc (document-vector-conj acc (nth a i))))))))
+
+#?(:kotoba
+   (defn- cap-id-ok? [id :document] :bool
+     (match-option (document-i64-value id) [:option :i64]
+       (none false)
+       (some n (and (<= 0 n) (<= n 255))))))
+
+#?(:kotoba
+   (defn- grant-ok? [x :document] :bool
+     (and (vector? x)
+          (= 2 (document-count x))
+          (kw? (nth x 0) :cap/call)
+          (cap-id-ok? (nth x 1)))))
+
+#?(:kotoba
+   (defn- malformed-of [allowed :document] :document
+     (loop [i 0 acc (document-vector)]
+       (if (>= i (document-count allowed))
+         acc
+         (recur (+ i 1)
+                (if (grant-ok? (nth allowed i))
+                  acc
+                  (document-vector-conj acc (nth allowed i))))))))
+
+#?(:kotoba
+   (defn- allow-shape-ok? [policy :document] :bool
+     (or (not (contains? policy :allow))
+         (vector? (get policy :allow (document-null))))))
+
+#?(:kotoba
+   (defn- policy-ok? [policy :document] :bool
+     (and (map? policy)
+          (every? policy-key-ok? (keys policy))
+          (allow-shape-ok? policy))))
+
+#?(:kotoba
+   (defn- err-doc [message :string data :document] :document
+     (document-map (document-keyword :message) (document-string message)
+                   (document-keyword :data) data)))
+
+#?(:kotoba
+   (defn- truthy? [d :document] :bool
+     (not (or (nil? d) (document-equal? d (document-bool false))))))
+
+;; ---- document -> typed readers for the two typed policies ----
+
+#?(:kotoba
+   (defn- opt-doc [d :document] [:option :document]
+     (if (nil? d)
+       (option-none-of [:option :document])
+       (option-some-of [:option :document] d))))
+
+#?(:kotoba
+   (defn- opt-string [d :document] [:option :string]
+     (match-option (document-string-value d) [:option :string]
+       (none (option-none-of [:option :string]))
+       (some s (option-some-of [:option :string] s)))))
+
+#?(:kotoba
+   (defn- opt-keyword [d :document] [:option :keyword]
+     (match-option (document-keyword-value d) [:option :keyword]
+       (none (option-none-of [:option :keyword]))
+       (some k (option-some-of [:option :keyword] k)))))
+
+#?(:kotoba
+   (defn- opt-bool [d :document] [:option :bool]
+     (cond (document-equal? d (document-bool true)) (option-some-of [:option :bool] true)
+           (document-equal? d (document-bool false)) (option-some-of [:option :bool] false)
+           :else (option-none-of [:option :bool]))))
+
+#?(:kotoba
+   (defn- kw-list-doc [xs [:list :keyword]] :document
+     (reduce (fn [acc k] (document-vector-conj acc (document-keyword k)))
+             (document-vector) xs)))
+
+#?(:kotoba
+   (defn- signing-result-doc [r [:ref :hw/signing-result]] :document
+     (document-map (document-keyword :hardware-signing/qualified?)
+                   (document-bool (:hardware-signing/qualified? r))
+                   (document-keyword :hardware-signing/scope)
+                   (document-keyword (:hardware-signing/scope r))
+                   (document-keyword :hardware-signing/violations)
+                   (kw-list-doc (:hardware-signing/violations r)))))
+
+#?(:kotoba
+   (defn- signing-check [ev :document] :document
+     (signing-result-doc
+      (hardware/evaluate-signing
+       (record-new [:record :hw/signing-evidence [[:provider-id [:option :string]] [:hardware-backed? [:option :bool]] [:provider-origin-verified? [:option :bool]] [:private-exported? [:option :bool]] [:sign-verified? [:option :bool]] [:unavailable-failed-closed? [:option :bool]]]]
+                   (opt-string (g ev :provider-id))
+                   (opt-bool (g ev :hardware-backed?))
+                   (opt-bool (g ev :provider-origin-verified?))
+                   (opt-bool (g ev :private-exported?))
+                   (opt-bool (g ev :sign-verified?))
+                   (opt-bool (g ev :unavailable-failed-closed?)))))))
+
+#?(:kotoba
+   (defn- classifications-of [d :document] [:list [:option :keyword]]
+     (loop [i 0 acc (typed-list-new [:list [:option :keyword]])]
+       (if (>= i (if (coll? d) (document-count d) 0))
+         acc
+         (recur (+ i 1) (typed-list-conj [:list [:option :keyword]] acc (opt-keyword (nth d i))))))))
+
+#?(:kotoba
+   (defn- grant-of [gr :document] [:ref :if/grant]
+     (record-new [:record :if/grant [[:id [:option :document]] [:subject [:option :document]] [:purpose [:option :document]] [:from [:option :keyword]] [:to [:option :keyword]] [:expires-at [:option :string]]]]
+                 (opt-doc (g gr :id))
+                 (opt-doc (g gr :subject))
+                 (opt-doc (g gr :purpose))
+                 (opt-keyword (g gr :from))
+                 (opt-keyword (g gr :to))
+                 (opt-string (g gr :expires-at)))))
+
+#?(:kotoba
+   (defn- grant-opt-of [gr :document] [:option [:ref :if/grant]]
+     (if (nil? gr)
+       (option-none-of [:option [:ref :if/grant]])
+       (option-some-of [:option [:ref :if/grant]] (grant-of gr)))))
+
+#?(:kotoba
+   (defn- violation-add [acc :document v [:ref :if/violation]] :document
+     (document-vector-conj
+      acc
+      (document-map (document-keyword :information-flow/control)
+                    (document-keyword (:information-flow/control v))
+                    (document-keyword :information-flow/message)
+                    (document-string (:information-flow/message v))))))
+
+#?(:kotoba
+   (defn- violations-doc [vs [:list [:ref :if/violation]]] :document
+     (reduce violation-add (document-vector) vs)))
+
+#?(:kotoba
+   (defn- grant-id-doc [o [:option :document]] :document
+     (match-option o [:option :document]
+       (none (document-null))
+       (some d d))))
+
+#?(:kotoba
+   (defn- flow-result-doc [r [:ref :if/result]] :document
+     (document-map (document-keyword :information-flow/allowed?)
+                   (document-bool (:information-flow/allowed? r))
+                   (document-keyword :information-flow/source)
+                   (document-keyword (:information-flow/source r))
+                   (document-keyword :information-flow/target)
+                   (document-keyword (:information-flow/target r))
+                   (document-keyword :information-flow/downgrade?)
+                   (document-bool (:information-flow/downgrade? r))
+                   (document-keyword :information-flow/grant-id)
+                   (grant-id-doc (:information-flow/grant-id r))
+                   (document-keyword :information-flow/violations)
+                   (violations-doc (:information-flow/violations r)))))
+
+#?(:kotoba
+   (defn- flow-check [req :document] :document
+     (flow-result-doc
+      (flow/evaluate-egress
+       (record-new [:record :if/request [[:subject [:option :document]] [:purpose [:option :document]] [:now [:option :string]] [:input-classifications [:list [:option :keyword]]] [:output-classification [:option :keyword]] [:declassification-grant [:option [:ref :if/grant]]]]]
+                   (opt-doc (g req :subject))
+                   (opt-doc (g req :purpose))
+                   (opt-string (g req :now))
+                   (classifications-of (g req :input-classifications))
+                   (opt-keyword (g req :output-classification))
+                   (grant-opt-of (g req :declassification-grant)))))))
+
+#?(:kotoba
+   (defn- merge-doc [a :document b :document] :document
+     (merge a b)))
+
+#?(:kotoba
+   (defn- flow-request [flow-policy :document attributes :document] :document
+     (merge
+      (document-map (document-keyword :subject) (get-in attributes [:subject :id] (document-null))
+                    (document-keyword :purpose) (g attributes :purpose)
+                    (document-keyword :now) (get-in attributes [:environment :now] (document-null)))
+      flow-policy)))
+
+#?(:kotoba
+   (defn check
+     "Deny-by-default capability admission. Policy shape:
+  {:allow [[:cap/call 7] ...] :abac {...} :attributes {...}}. Returns least privilege and lint facts or
+  throws before any backend is selected. (A set in a document tree is a vector without duplicates.)"
+     [hir :document policy :document] :document
+     (do
+       (when-not (policy-ok? policy)
+         (throw (err-doc "malformed capability policy"
+               (document-map (document-keyword :phase) (document-keyword :admission)))))
+       (let [required (distinct-of (g hir :effects))
+             allowed (distinct-of (g policy :allow))
+             malformed (malformed-of allowed)
+             missing (difference-of required allowed)
+             unused (difference-of allowed required)
+             supplied-attributes (g policy :attributes)
+             attributes (assoc
+                         (assoc supplied-attributes :resource
+                                (merge (document-map (document-keyword :effects) required)
+                                       (g supplied-attributes :resource)))
+                         :action
+                         (merge (document-map (document-keyword :id) (document-keyword :compiler/admit)
+                                              (document-keyword :capabilities) required)
+                                (g supplied-attributes :action)))
+             abac-result (abac/evaluate attributes (g policy :abac))
+             crypto-required? (truthy? (g policy :crypto-required?))
+             crypto-result (if (or crypto-required? (truthy? (g policy :crypto-envelope)))
+                             (crypto/check-production-envelope
+                              (g policy :crypto-policy) (g policy :crypto-envelope))
+                             (document-null))
+             hardware-signing-required? (truthy? (g policy :hardware-signing-required?))
+             hardware-signing-result
+             (if (or hardware-signing-required?
+                     (truthy? (g policy :hardware-signing-evidence)))
+               (signing-check (g policy :hardware-signing-evidence))
+               (document-null))
+             flow-policy (g policy :information-flow)
+             flow-result
+             (if (truthy? flow-policy)
+               (flow-check (flow-request flow-policy attributes))
+               (document-null))]
+         (when (> (document-count malformed) 0)
+           (throw (err-doc "malformed capability policy"
+                 (document-map (document-keyword :phase) (document-keyword :admission)
+                               (document-keyword :entries) malformed))))
+         (when (> (document-count missing) 0)
+           (throw (err-doc "capability policy denies required effects"
+                 (document-map (document-keyword :phase) (document-keyword :admission)
+                               (document-keyword :required) required
+                               (document-keyword :allowed) allowed
+                               (document-keyword :missing) missing))))
+         (when-not (truthy? (g abac-result :abac/allowed?))
+           (throw (err-doc "ABAC policy denies compilation"
+                 (document-map (document-keyword :phase) (document-keyword :admission)
+                               (document-keyword :abac/policy-id) (g abac-result :abac/policy-id)
+                               (document-keyword :abac/violations) (g abac-result :abac/violations)))))
+         (when (and (truthy? flow-result)
+                    (not (truthy? (g flow-result :information-flow/allowed?))))
+           (throw (err-doc "information-flow policy denies compilation"
+                 (document-map (document-keyword :phase) (document-keyword :admission)
+                               (document-keyword :information-flow/violations)
+                               (g flow-result :information-flow/violations)))))
+         (when (and crypto-required? (not (truthy? (g crypto-result :valid?))))
+           (throw (err-doc "hybrid PQC policy denies compilation"
+                 (document-map (document-keyword :phase) (document-keyword :admission)
+                               (document-keyword :crypto) crypto-result))))
+         (when (and hardware-signing-required?
+                    (not (truthy? (g hardware-signing-result :hardware-signing/qualified?))))
+           (throw (err-doc "hardware signing policy denies compilation"
+                 (document-map (document-keyword :phase) (document-keyword :admission)
+                               (document-keyword :hardware-signing) hardware-signing-result))))
+         (document-map (document-keyword :admitted?) (document-bool true)
+                       (document-keyword :required) required
+                       (document-keyword :minimal-policy)
+                       (document-map (document-keyword :allow) required)
+                       (document-keyword :unused-grants) unused
+                       (document-keyword :abac) abac-result
+                       (document-keyword :information-flow) flow-result
+                       (document-keyword :crypto) crypto-result
+                       (document-keyword :hardware-signing) hardware-signing-result))))
+
+   :default
 (defn check
   "Deny-by-default capability admission. Policy shape:
   {:allow #{[:cap/call 7] ...} :abac {...} :attributes {...}}. Returns least privilege and lint facts or
@@ -94,4 +398,4 @@
      :abac abac-result
      :information-flow flow-result
      :crypto crypto-result
-     :hardware-signing hardware-signing-result}))
+     :hardware-signing hardware-signing-result})))
