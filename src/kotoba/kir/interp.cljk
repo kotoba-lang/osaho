@@ -214,6 +214,39 @@
     (string=? s "f32-to-i64-truncating") 169
     :else 0))
 
+(defn- document-op-code [s :string] :i64
+  (cond
+    (string=? s "document-null") 200
+    (string=? s "document-bool") 201
+    (string=? s "document-i64") 202
+    (string=? s "document-f64") 203
+    (string=? s "document-string") 204
+    (string=? s "document-keyword") 205
+    (string=? s "document-vector") 206
+    (string=? s "document-list") 207
+    (string=? s "document-map") 208
+    (string=? s "document-count") 209
+    (string=? s "document-kind") 210
+    (string=? s "document-vector-at") 211
+    (string=? s "document-list-at") 212
+    (string=? s "document-vector-assoc") 213
+    (string=? s "document-vector-conj") 214
+    (string=? s "document-vector-drop") 215
+    (string=? s "document-vector-remove") 216
+    (string=? s "document-map-entry-at") 217
+    (string=? s "document-equal?") 218
+    (string=? s "document-contains") 219
+    (string=? s "document-get") 220
+    (string=? s "document-assoc") 221
+    (string=? s "document-dissoc") 222
+    (string=? s "document-merge") 223
+    (string=? s "document-string-value") 224
+    (string=? s "document-keyword-value") 225
+    (string=? s "document-bool-value") 226
+    (string=? s "document-i64-value") 227
+    (string=? s "document-f64-value") 228
+    :else 0))
+
 (defn- op-code [s :string] :i64
   (let [c (string-code-point-at s 0)
         n (string-byte-length s)]
@@ -226,7 +259,6 @@
       (= c 62) (if (= n 1) 12 (if (string=? s ">=") 14 0))
       (= c 113) (if (string=? s "quot") 4 0)
       (= c 108) (if (string=? s "let") 29 0)
-      (= c 100) (if (string=? s "do") 31 0)
       (= c 97) (if (string=? s "arena-scope") 32 0)
       (= c 109) (cond (string=? s "min") 8 (string=? s "max") 9 :else 0)
       (= c 120) (if (string=? s "xorshift32") 27 0)
@@ -244,6 +276,7 @@
                       (string=? s "i32-wrapping-mul") 22 (string=? s "i32-xor") 23
                       (string=? s "i32-shift-left") 24 (string=? s "i32-shift-right") 25
                       (and (> n 8) (= (string-code-point-at s 4) 116)) (float-op-code s) :else 0)
+      (= c 100) (cond (string=? s "do") 31 (and (> n 9) (= (string-code-point-at s 7) 116)) (document-op-code s) :else 0)
       (= c 102) (if (and (> n 4) (= (string-code-point-at s 3) 45)) (float-op-code s) 0)
       :else 0)))
 
@@ -360,6 +393,10 @@
 
 (defn- i64? [v [:ref :kir/v]] :bool (= 2 (kv/tag-of v)))
 
+(defn- bool-word-true? [v [:ref :kir/v]] :bool (not (= 0 (kv/n-of v))))
+
+(defn- doc? [v [:ref :kir/v]] :bool (and (= 13 (kv/tag-of v)) (= (kv/k-of v) :document)))
+
 (defn- bool-word? [v [:ref :kir/v]] :bool
   (or (= 1 (kv/tag-of v))
       (and (= 2 (kv/tag-of v)) (or (= 0 (kv/n-of v)) (= 1 (kv/n-of v))))))
@@ -378,6 +415,8 @@
         (= k :bool) (bool-word? v)
         (= k :string) (= 4 (kv/tag-of v))
         (= k :bytes) (= 7 (kv/tag-of v))
+        (= k :keyword) (= 5 (kv/tag-of v))
+        (= k :document) (doc? v)
         (or (= k :f64) (= k :f32)) (= 3 (kv/tag-of v))
         (= k :vector-i64) (= 9 (kv/tag-of v))
         (= k :option-i64) (= 14 (kv/tag-of v))
@@ -1081,6 +1120,209 @@
       (< op 140) (ev-f64-op (- op 120) xs fuel)
       :else (ev-f32-op (- op 140) xs fuel))))
 
+
+;; ---- documents (200-228) ----
+;; A document is a variant Value (tag 13) marked with k = :document: s is the document tag
+;; ("null" "bool" "i64" "f64" "string" "keyword" "vector" "list" "map"), kids the payload (one
+;; leaf Value, the items, or a map's flat key/value pairs with every key a "keyword" node, kept
+;; sorted by keyword text). Sets, non-keyword map keys, sha256, print and read are not ported.
+
+(defn- doc-v [tag :string kids [:list [:ref :kir/v]]] [:ref :kir/v]
+  (record-new [:ref :kir/v] 13 0 tag :document (bytes-empty) kids))
+
+(defn- doc-leaf [tag :string x [:ref :kir/v]] [:ref :kir/v] (doc-v tag (kv/one-value x)))
+
+(defn- doc-tag? [v [:ref :kir/v] tag :string] :bool (string=? (kv/s-of v) tag))
+
+(defn- doc-limit [] :i64 32)
+
+(defn- kw-text [k :keyword] :string (document-edn-print (document-keyword k)))
+
+(defn- key-text [kd [:ref :kir/v]] :string (kw-text (kv/k-of (kv/nth-of kd 0))))
+
+(defn- concat-values [xs [:list [:ref :kir/v]] ys [:list [:ref :kir/v]]] [:list [:ref :kir/v]]
+  (loop [j 0 acc xs]
+    (if (>= j (vector-count ys)) acc (recur (inc j) (kv/append-value acc (arg-v ys j))))))
+
+;; position (even index into the flat kids) of the pair keyed TEXT, or -1
+(defn- map-find [kids [:list [:ref :kir/v]] text :string] :i64
+  (let [n (vector-count kids)]
+    (loop [j 0]
+      (cond
+        (>= j n) -1
+        (string=? (key-text (arg-v kids j)) text) j
+        :else (recur (+ j 2))))))
+
+(defn- put-pair [acc [:list [:ref :kir/v]] kd [:ref :kir/v] x [:ref :kir/v]] [:list [:ref :kir/v]]
+  (kv/append-value (kv/append-value acc kd) x))
+
+;; KIDS with (KD, X) inserted in key order, or replacing the pair with the same key
+(defn- map-put [kids [:list [:ref :kir/v]] kd [:ref :kir/v] x [:ref :kir/v]] [:list [:ref :kir/v]]
+  (let [n (vector-count kids)
+        text (key-text kd)]
+    (loop [j 0 acc (kv/no-values) placed false]
+      (cond
+        (>= j n) (if placed acc (put-pair acc kd x))
+        (and (not placed) (string=? (key-text (arg-v kids j)) text))
+        (recur (+ j 2) (put-pair acc kd x) true)
+        (and (not placed) (> (string-compare (key-text (arg-v kids j)) text) 0))
+        (recur j (put-pair acc kd x) true)
+        :else
+        (recur (+ j 2) (put-pair acc (arg-v kids j) (arg-v kids (+ j 1))) placed)))))
+
+(defn- map-drop [kids [:list [:ref :kir/v]] at :i64] [:list [:ref :kir/v]]
+  (let [n (vector-count kids)]
+    (loop [j 0 acc (kv/no-values)]
+      (cond
+        (>= j n) acc
+        (= j at) (recur (+ j 2) acc)
+        :else (recur (+ j 2) (put-pair acc (arg-v kids j) (arg-v kids (+ j 1))))))))
+
+(defn- key-node [k [:ref :kir/v]] [:ref :kir/v] (doc-leaf "keyword" k))
+
+(defn- all-docs? [xs [:list [:ref :kir/v]]] :bool
+  (loop [j 0]
+    (if (>= j (vector-count xs)) true
+      (if (doc? (arg-v xs j)) (recur (inc j)) false))))
+
+(defn- map-args-ok? [xs [:list [:ref :kir/v]]] :bool
+  (and (= 0 (rem (vector-count xs) 2))
+       (loop [j 0]
+         (if (>= j (vector-count xs)) true
+           (if (and (= 5 (kv/tag-of (arg-v xs j))) (doc? (arg-v xs (+ j 1)))) (recur (+ j 2)) false)))))
+
+(defn- build-map [xs [:list [:ref :kir/v]]] [:list [:ref :kir/v]]
+  (loop [j 0 acc (kv/no-values)]
+    (if (>= j (vector-count xs)) acc
+      (recur (+ j 2) (map-put acc (key-node (arg-v xs j)) (arg-v xs (+ j 1)))))))
+
+(defn- doc-arity [op :i64] :i64
+  (cond
+    (= op 200) 0
+    (or (= op 206) (or (= op 207) (or (= op 208) (= op 223)))) -1
+    (or (= op 213) (= op 221)) 3
+    (or (= op 211) (or (= op 212) (or (= op 214) (or (= op 215) (or (= op 216) (or (= op 217)
+      (or (= op 218) (or (= op 219) (or (= op 220) (= op 222)))))))))) 2
+    :else 1))
+
+;; operand tags for the fixed-arity operations
+(defn- doc-sig-ok? [op :i64 xs [:list [:ref :kir/v]]] :bool
+  (cond
+    (= op 201) (bool-word? (arg-v xs 0))
+    (= op 202) (i64? (arg-v xs 0))
+    (= op 203) (= 3 (kv/tag-of (arg-v xs 0)))
+    (= op 204) (= 4 (kv/tag-of (arg-v xs 0)))
+    (= op 205) (= 5 (kv/tag-of (arg-v xs 0)))
+    (or (= op 209) (or (= op 210) (>= op 224))) (doc? (arg-v xs 0))
+    (or (= op 211) (or (= op 212) (or (= op 215) (or (= op 216) (= op 217)))))
+    (and (doc? (arg-v xs 0)) (i64? (arg-v xs 1)))
+    (= op 213) (and (doc? (arg-v xs 0)) (and (i64? (arg-v xs 1)) (doc? (arg-v xs 2))))
+    (or (= op 214) (= op 218)) (and (doc? (arg-v xs 0)) (doc? (arg-v xs 1)))
+    (or (= op 219) (or (= op 220) (= op 222))) (and (doc? (arg-v xs 0)) (= 5 (kv/tag-of (arg-v xs 1))))
+    (= op 221) (and (doc? (arg-v xs 0)) (and (= 5 (kv/tag-of (arg-v xs 1))) (doc? (arg-v xs 2))))
+    (or (= op 206) (or (= op 207) (= op 223))) (all-docs? xs)
+    (= op 208) (map-args-ok? xs)
+    :else true))
+
+(defn- doc-opt [ok? :bool x [:ref :kir/v] fuel :i64] [:ref :kir.interp/res]
+  (r-val (if ok? (kv/some-value x) (kv/none-value)) fuel))
+
+(defn- doc-container? [v [:ref :kir/v]] :bool
+  (or (doc-tag? v "vector") (or (doc-tag? v "list") (doc-tag? v "map"))))
+
+(defn- doc-count [d [:ref :kir/v] fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (not (doc-container? d)) (r-trap fuel "document-container-required")
+    (doc-tag? d "map") (int-val (quot (kv/count-of d) 2) fuel)
+    :else (int-val (kv/count-of d) fuel)))
+
+(defn- doc-vec-op [op :i64 d [:ref :kir/v] xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [items (kv/kids-of d)
+        cnt (vector-count items)
+        i (if (= op 214) 0 (arg-n xs 1))]
+    (cond
+      (not (doc-tag? d (if (= op 212) "list" "vector")))
+      (r-trap fuel (if (= op 212) "document-list-required" "document-vector-required"))
+      (or (= op 211) (= op 212))
+      (doc-opt (and (>= i 0) (< i cnt)) (if (and (>= i 0) (< i cnt)) (arg-v items i) (kv/nil-value)) fuel)
+      (= op 214)
+      (if (>= cnt (doc-limit)) (r-trap fuel "document-vector-too-large")
+        (r-val (doc-v "vector" (kv/append-value items (arg-v xs 1))) fuel))
+      (= op 215)
+      (if (and (>= i 0) (<= i cnt)) (r-val (doc-v "vector" (slice-values items i cnt)) fuel)
+        (r-trap fuel "document-vector-drop-out-of-range"))
+      (not (and (>= i 0) (< i cnt))) (r-trap fuel "document-vector-index-out-of-range")
+      (= op 213) (r-val (doc-v "vector" (replace-at items i (arg-v xs 2))) fuel)
+      :else (r-val (doc-v "vector" (concat-values (slice-values items 0 i) (slice-values items (+ i 1) cnt))) fuel))))
+
+(defn- doc-map-op [op :i64 d [:ref :kir/v] xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [kids (kv/kids-of d)]
+    (cond
+      (not (doc-tag? d "map")) (r-trap fuel "document-map-required")
+      (= op 217)
+      (let [i (arg-n xs 1)]
+        (if (and (>= i 0) (< (* 2 i) (vector-count kids)))
+          (doc-opt true (doc-v "vector" (kv/two-values (arg-v kids (* 2 i)) (arg-v kids (+ (* 2 i) 1)))) fuel)
+          (doc-opt false (kv/nil-value) fuel)))
+      :else
+      (let [at (map-find kids (kw-text (kv/k-of (arg-v xs 1))))]
+        (cond
+          (= op 219) (r-val (kv/bool-value (>= at 0)) fuel)
+          (= op 220) (doc-opt (>= at 0) (if (>= at 0) (arg-v kids (+ at 1)) (kv/nil-value)) fuel)
+          (= op 222) (r-val (if (>= at 0) (doc-v "map" (map-drop kids at)) d) fuel)
+          (and (< at 0) (>= (quot (vector-count kids) 2) (doc-limit))) (r-trap fuel "document-map-too-large")
+          :else (r-val (doc-v "map" (map-put kids (key-node (arg-v xs 1)) (arg-v xs 2))) fuel))))))
+
+(defn- merge-into [acc [:list [:ref :kir/v]] xs [:list [:ref :kir/v]] i :i64] [:list [:ref :kir/v]]
+  (if (>= i (vector-count xs)) acc
+    (let [kids (kv/kids-of (arg-v xs i))]
+      (merge-into
+        (loop [j 0 a acc]
+          (if (>= j (vector-count kids)) a
+            (recur (+ j 2) (map-put a (arg-v kids j) (arg-v kids (+ j 1))))))
+        xs (inc i)))))
+
+(defn- all-maps? [xs [:list [:ref :kir/v]]] :bool
+  (loop [j 0]
+    (if (>= j (vector-count xs)) true
+      (if (doc-tag? (arg-v xs j) "map") (recur (inc j)) false))))
+
+(defn- doc-kind-name [d [:ref :kir/v]] :keyword (keyword-from-string (kv/s-of d)))
+
+(defn- ev-document [op :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [want (doc-arity op)]
+    (cond
+      (and (>= want 0) (not (= want (vector-count xs)))) (r-trap fuel "arity-mismatch")
+      (not (doc-sig-ok? op xs)) (mismatch fuel)
+      (= op 200) (r-val (doc-v "null" (kv/no-values)) fuel)
+      (= op 201) (r-val (doc-leaf "bool" (kv/bool-value (bool-word-true? (arg-v xs 0)))) fuel)
+      (= op 202) (r-val (doc-leaf "i64" (arg-v xs 0)) fuel)
+      (= op 203)
+      (if (f64-finite? (fw (arg-v xs 0))) (r-val (doc-leaf "f64" (arg-v xs 0)) fuel) (r-trap fuel "document-f64-not-finite"))
+      (= op 204) (r-val (doc-leaf "string" (arg-v xs 0)) fuel)
+      (= op 205) (r-val (doc-leaf "keyword" (arg-v xs 0)) fuel)
+      (or (= op 206) (= op 207))
+      (if (> (vector-count xs) (doc-limit)) (r-trap fuel "document-vector-too-large")
+        (r-val (doc-v (if (= op 206) "vector" "list") xs) fuel))
+      (= op 208)
+      (if (> (quot (vector-count xs) 2) (doc-limit)) (r-trap fuel "document-map-too-large")
+        (r-val (doc-v "map" (build-map xs)) fuel))
+      (= op 209) (doc-count (arg-v xs 0) fuel)
+      (= op 210) (r-val (kv/keyword-value (doc-kind-name (arg-v xs 0))) fuel)
+      (= op 218) (r-val (kv/bool-value (kv/value-eq (arg-v xs 0) (arg-v xs 1))) fuel)
+      (= op 223)
+      (if (not (all-maps? xs)) (r-trap fuel "document-map-required")
+        (let [m (merge-into (kv/no-values) xs 0)]
+          (if (> (quot (vector-count m) 2) (doc-limit)) (r-trap fuel "document-map-too-large")
+            (r-val (doc-v "map" m) fuel))))
+      (>= op 224)
+      (let [d (arg-v xs 0)
+            tag (cond (= op 224) "string" (= op 225) "keyword" (= op 226) "bool" (= op 227) "i64" :else "f64")]
+        (doc-opt (doc-tag? d tag) (if (doc-tag? d tag) (kv/nth-of d 0) (kv/nil-value)) fuel))
+      (or (= op 217) (or (= op 219) (or (= op 220) (or (= op 221) (= op 222)))))
+      (doc-map-op op (arg-v xs 0) xs fuel)
+      :else (doc-vec-op op (arg-v xs 0) xs fuel))))
+
 ;; ---- calls ----
 
 (defn- loop-helper-name? [s :string] :bool
@@ -1182,6 +1424,12 @@
       ar
       (ev-float op (kv/kids-of (res-value ar)) (res-fuel ar)))))
 
+(defn- ev-document-call [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (let [ar (ev-args form env cx fuel)]
+    (if (not (= 0 (res-kind ar)))
+      ar
+      (ev-document op (kv/kids-of (res-value ar)) (res-fuel ar)))))
+
 (defn- ev-list [form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
   (let [head (form/first-of form)]
     (if (not (form/is-symbol? head))
@@ -1197,6 +1445,7 @@
               t))
           (= op 31) (ev-do-from form 1 env cx fuel)
           (= op 32) (ev (form/nth-of form 1) env cx fuel)
+          (>= op 200) (ev-document-call op form env cx fuel)
           (>= op 120) (ev-float-call op form env cx fuel)
           (>= op 100) (ev-bytes-call op form env cx fuel)
           (>= op 60) (ev-agg op form env cx fuel)
@@ -1216,6 +1465,7 @@
       (= t 1) (r-val (kv/bool-value (form/bool-value form)) fuel)
       (= t 3) (r-val (kv/string-value (form/string-value form)) fuel)
       (= t 5) (ev-symbol form env fuel)
+      (= t 4) (r-val (kv/keyword-value (form/keyword-value form)) fuel)
       (= t 6) (if (= 0 (form/count-of form)) (r-trap fuel "unknown-function") (ev-list form env cx fuel))
       :else (r-trap fuel "unsupported-form"))))
 
@@ -1269,10 +1519,22 @@
                false)))
          (expr-ok? (form/nth-of form 2) fns))))
 
+(defn- doc-key-op? [op :i64] :bool
+  (or (= op 208) (or (= op 219) (or (= op 220) (or (= op 221) (= op 222))))))
+
+;; A map key must be a keyword literal in the source (a computed key could be any document, and
+;; non-keyword keys are not ported).
+(defn- doc-keys-literal? [op :i64 form [:ref :form/r]] :bool
+  (if (= op 208)
+    (loop [i 1]
+      (if (>= i (form/count-of form)) true
+        (if (= 4 (form/tag-of (form/nth-of form i))) (recur (+ i 2)) false)))
+    (and (> (form/count-of form) 2) (= 4 (form/tag-of (form/nth-of form 2))))))
+
 (defn- expr-ok? [form [:ref :form/r] fns [:ref :form/r]] :bool
   (let [t (form/tag-of form)]
     (cond
-      (or (= t 1) (or (= t 2) (or (= t 3) (= t 5)))) true
+      (or (= t 1) (or (= t 2) (or (= t 3) (or (= t 4) (= t 5))))) true
       (= t 6)
       (if (and (> (form/count-of form) 0) (form/is-symbol? (form/first-of form)))
         (let [name (form/symbol-value (form/first-of form))]
@@ -1286,6 +1548,8 @@
                  (desc-ok? (form/nth-of form 1))
                  (desc-shape-ok? (op-code name) (form/nth-of form 1))
                  (all-expr-ok? form 2 fns))
+            (and (ported-op? name) (doc-key-op? (op-code name)))
+            (and (doc-keys-literal? (op-code name) form) (all-expr-ok? form 1 fns))
             (ported-op? name) (all-expr-ok? form 1 fns)
             :else (and (fn-name-in? fns name) (all-expr-ok? form 1 fns))))
         false)
@@ -1294,7 +1558,7 @@
 (defn- desc-ok? [ty [:ref :form/r]] :bool
   (if (form/is-keyword? ty)
     (let [k (form/keyword-value ty)]
-      (or (= k :i64) (or (= k :bool) (or (= k :string) (or (= k :bytes) (or (= k :f64) (or (= k :f32) (or (= k :vector-i64) (or (= k :option-i64) (= k :result-i64))))))))))
+      (or (= k :i64) (or (= k :bool) (or (= k :string) (or (= k :bytes) (or (= k :keyword) (or (= k :document) (or (= k :f64) (or (= k :f32) (or (= k :vector-i64) (or (= k :option-i64) (= k :result-i64))))))))))))
     (let [h (desc-head ty)
           n (form/count-of ty)]
       (cond
