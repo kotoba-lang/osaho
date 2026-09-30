@@ -130,6 +130,30 @@
 ;; canonical normalization — a closed, injective, tagged value domain
 ;; ---------------------------------------------------------------------------
 
+;; ASCII-only lower-casing (f64 bits hex is [0-9a-fA-F]). `str/lower` is the
+;; host Locale-dependent mapping and has no Kotoba twin; on the Kotoba route
+;; only A-Z is folded, which is exactly what the hex payload needs.
+(def ^:private ascii-lower-letters "abcdefghijklmnopqrstuvwxyz")
+
+#?(:kotoba
+   (defn- ascii-lower-from [s :string index :i64 out :string] :string
+     (if (= index (string-byte-length s))
+       out
+       (let [c (string-code-point-at s index)
+             width (if (< c 128) 1 (if (< c 2048) 2 (if (< c 65536) 3 4)))]
+         (ascii-lower-from
+          s (+ index width)
+          (string-concat
+           out
+           (if (if (>= c 65) (<= c 90) false)
+             (string-substring ascii-lower-letters (- c 65) (+ (- c 65) 1))
+             (string-substring s index (+ index width))))))))
+   :default nil)
+
+(defn- ascii-lower [s]
+  #?(:kotoba (ascii-lower-from s 0 "")
+     :default (str/lower s)))
+
 (def ^:private hex-digits "0123456789abcdef")
 
 (defn- byte->hex [b]
@@ -268,7 +292,7 @@
     ;; make the same KIR encode differently per implementation. The explicit
     ;; form is the only admitted representation, and `f64-bits-hex` exists so
     ;; a frontend can produce it.
-    (f64-literal? value) ["f64" (str/lower (get value f64-wrapper-key))]
+    (f64-literal? value) ["f64" (ascii-lower (get value f64-wrapper-key))]
 
     ;; Same tag as a plain integer: `(i64 5)` and `5` denote one value, so they
     ;; must share one identity. The wrapper is about how the value survives a
