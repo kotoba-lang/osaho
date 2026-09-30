@@ -836,6 +836,21 @@
                          (keyword? field)
                          (some #(= field (first %)) (nth type 2))
                          (walk value)))
+                  ;; Update: a record with one field replaced, the same record
+                  ;; type (amu ADR 0353 floor :native-record-operations). Both
+                  ;; native backends lower it to a fresh record -- a pair chain
+                  ;; that re-projects every other field, or a new slot bundle --
+                  ;; so it needs no representation `record-new` lacks, and
+                  ;; costs the one cell `record-new` does.
+                  (= op 'record-assoc)
+                  (let [[type value field replacement] args]
+                    (and (= 4 (count args))
+                         (or (native-scalar-record-type? type)
+                             (native-aggregate-of? :record type))
+                         (keyword? field)
+                         (some #(= field (first %)) (nth type 2))
+                         (walk value)
+                         (walk replacement)))
                   ;; Construction: the tag must be a declared case (frontend
                   ;; already enforces this too, unconditionally, via
                   ;; `infer-expression-type`'s own "variant constructor tag
