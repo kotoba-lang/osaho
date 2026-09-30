@@ -76,6 +76,85 @@
 ;;   19 i32-wrap  20 u32-wrap  21 i32-wrapping-add  22 i32-wrapping-mul  23 i32-xor
 ;;   24 i32-shift-left  25 i32-shift-right  26 u32-shift-right  27 xorshift32
 ;;   28 bool-not  29 let  30 if  31 do  32 arena-scope
+;;   strings: 40 string-byte-length  41 string-length  42 string-concat  43 string=?
+;;   44 string-substring  45 string-code-point-at  46 string-from-i64  47 string-contains?
+;;   48 string-index-of  49 string-replace-all  50 string-split-count  51 string-compare
+;;   52 string-fold-ascii  53 string-index-of-from
+(defn- string-op-code [s :string] :i64
+  (cond
+    (string=? s "string-byte-length") 40
+    (string=? s "string-length") 41
+    (string=? s "string-concat") 42
+    (string=? s "string=?") 43
+    (string=? s "string-substring") 44
+    (string=? s "string-code-point-at") 45
+    (string=? s "string-from-i64") 46
+    (string=? s "string-contains?") 47
+    (string=? s "string-index-of") 48
+    (string=? s "string-replace-all") 49
+    (string=? s "string-split-count") 50
+    (string=? s "string-compare") 51
+    (string=? s "string-fold-ascii") 52
+    (string=? s "string-index-of-from") 53
+    :else 0))
+
+;;   aggregates (typed ops take a type descriptor as argument 1):
+;;   60 option-some-of 61 option-none-of 62 option-some?-of 63 option-value-of 64 option-match
+;;   65 result-ok-of 66 result-err-of 67 result-ok?-of 68 result-value-of 69 result-error-of
+;;   70 result-match-of 71 typed-list-new 72 typed-list-conj 73 typed-list-nth
+;;   74 vector-new 75 vector-count 76 vector-at 77 vector-get 78 vector-drop 79 vector-take
+;;   80 vector-alloc 81 vector-assoc 82 vector-assoc! 83 vector-conj
+;;   84 option-some 85 option-none 86 option-some? 87 option-value
+;;   88 result-ok 89 result-err 90 result-ok? 91 result-value 92 result-error
+(defn- option-op-code [s :string] :i64
+  (cond
+    (string=? s "option-some-of") 60
+    (string=? s "option-none-of") 61
+    (string=? s "option-some?-of") 62
+    (string=? s "option-value-of") 63
+    (string=? s "option-match") 64
+    (string=? s "option-some") 84
+    (string=? s "option-none") 85
+    (string=? s "option-some?") 86
+    (string=? s "option-value") 87
+    :else 0))
+
+(defn- result-op-code [s :string] :i64
+  (cond
+    (string=? s "result-ok-of") 65
+    (string=? s "result-err-of") 66
+    (string=? s "result-ok?-of") 67
+    (string=? s "result-value-of") 68
+    (string=? s "result-error-of") 69
+    (string=? s "result-match-of") 70
+    (string=? s "result-ok") 88
+    (string=? s "result-err") 89
+    (string=? s "result-ok?") 90
+    (string=? s "result-value") 91
+    (string=? s "result-error") 92
+    :else 0))
+
+(defn- vector-op-code [s :string] :i64
+  (cond
+    (string=? s "vector-new") 74
+    (string=? s "vector-count") 75
+    (string=? s "vector-at") 76
+    (string=? s "vector-get") 77
+    (string=? s "vector-drop") 78
+    (string=? s "vector-take") 79
+    (string=? s "vector-alloc") 80
+    (string=? s "vector-assoc") 81
+    (string=? s "vector-assoc!") 82
+    (string=? s "vector-conj") 83
+    :else 0))
+
+(defn- list-op-code [s :string] :i64
+  (cond
+    (string=? s "typed-list-new") 71
+    (string=? s "typed-list-conj") 72
+    (string=? s "typed-list-nth") 73
+    :else 0))
+
 (defn- op-code [s :string] :i64
   (let [c (string-code-point-at s 0)
         n (string-byte-length s)]
@@ -92,6 +171,11 @@
       (= c 97) (if (string=? s "arena-scope") 32 0)
       (= c 109) (cond (string=? s "min") 8 (string=? s "max") 9 :else 0)
       (= c 120) (if (string=? s "xorshift32") 27 0)
+      (= c 115) (string-op-code s)
+      (= c 111) (option-op-code s)
+      (= c 114) (result-op-code s)
+      (= c 118) (vector-op-code s)
+      (= c 116) (list-op-code s)
       (= c 98) (cond (string=? s "bit-xor") 5 (string=? s "bit-and") 6 (string=? s "bit-or") 7
                      (string=? s "bit-not") 15 (string=? s "bool-not") 28 :else 0)
       (= c 117) (cond (string=? s "u64-shift-right") 18 (string=? s "u32-wrap") 20
@@ -219,11 +303,29 @@
   (or (= 1 (kv/tag-of v))
       (and (= 2 (kv/tag-of v)) (or (= 0 (kv/n-of v)) (= 1 (kv/n-of v))))))
 
-;; A declared type is :i64 or :bool in this subset (`ported?` refuses others).
+;; A declared type descriptor (a Form). Only the tag is checked, as the host's
+;; `operand-tag?` does for a value inside a typed program.
+(defn- desc-head [ty [:ref :form/r]] :keyword
+  (if (and (form/is-vec? ty) (> (form/count-of ty) 0) (form/is-keyword? (form/nth-of ty 0)))
+    (form/keyword-value (form/nth-of ty 0))
+    :none))
+
 (defn- type-ok? [ty [:ref :form/r] v [:ref :kir/v]] :bool
-  (if (and (form/is-keyword? ty) (= (form/keyword-value ty) :bool))
-    (bool-word? v)
-    (i64? v)))
+  (if (form/is-keyword? ty)
+    (let [k (form/keyword-value ty)]
+      (cond
+        (= k :bool) (bool-word? v)
+        (= k :string) (= 4 (kv/tag-of v))
+        (= k :vector-i64) (= 9 (kv/tag-of v))
+        (= k :option-i64) (= 14 (kv/tag-of v))
+        (= k :result-i64) (= 15 (kv/tag-of v))
+        :else (i64? v)))
+    (let [h (desc-head ty)]
+      (cond
+        (= h :option) (= 14 (kv/tag-of v))
+        (= h :result) (= 15 (kv/tag-of v))
+        (= h :list) (= 8 (kv/tag-of v))
+        :else false))))
 
 ;; ---- evaluation ----
 
@@ -234,15 +336,17 @@
     (if (= 2 (res-kind r)) (r-trap (res-fuel r) "trampoline-off-tail") r)))
 
 ;; Arguments 1.. of a call form, left to right, as a vector value in a result.
+(defn- ev-args-range [form [:ref :form/r] from :i64 to :i64 env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (loop [i from acc (kv/no-values) fu fuel]
+    (if (>= i to)
+      (r-val (kv/vector-value acc) fu)
+      (let [r (ev-operand (form/nth-of form i) env cx fu)]
+        (if (= 0 (res-kind r))
+          (recur (inc i) (kv/append-value acc (res-value r)) (res-fuel r))
+          r)))))
+
 (defn- ev-args [form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
-  (let [n (form/count-of form)]
-    (loop [i 1 acc (kv/no-values) fu fuel]
-      (if (>= i n)
-        (r-val (kv/vector-value acc) fu)
-        (let [r (ev-operand (form/nth-of form i) env cx fu)]
-          (if (= 0 (res-kind r))
-            (recur (inc i) (kv/append-value acc (res-value r)) (res-fuel r))
-            r))))))
+  (ev-args-range form 1 (form/count-of form) env cx fuel))
 
 (defn- ev-let-from [bs [:ref :form/r] i :i64 env [:list [:ref :kir/v]] body [:ref :form/r]
                     cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
@@ -378,6 +482,338 @@
               (= op 17) (r-val (kv/i64-value (i64-shift-right x c)) fuel)
               :else (r-val (kv/i64-value (u64-shift-right x c)) fuel))))))))
 
+;; ---- strings ----
+;; Strings are UTF-8 on the Kotoba route as on the host contract (offsets are byte
+;; offsets). A Kotoba builtin ABORTS on a bad offset, so every precondition the
+;; host checks is checked here first and answered as a trap VALUE.
+
+(defn- str-limit [] :i64 65536)
+
+(defn- str-arg [xs [:list [:ref :kir/v]] i :i64] :string
+  (kv/s-of (typed-list-nth [:list [:ref :kir/v]] xs i)))
+
+(defn- op-sig [op :i64] :string
+  (cond
+    (or (= op 40) (or (= op 41) (= op 52))) "s"
+    (= op 46) "i"
+    (or (= op 42) (or (= op 43) (or (= op 47) (or (= op 48) (or (= op 50) (= op 51)))))) "ss"
+    (= op 49) "sss"
+    (= op 44) "sii"
+    (= op 45) "si"
+    :else "ssi"))
+
+(defn- sig-ok? [sig :string xs [:list [:ref :kir/v]]] :bool
+  (loop [j 0]
+    (if (>= j (string-byte-length sig)) true
+      (let [want (if (= (string-code-point-at sig j) 115) 4 2)]
+        (if (= want (kv/tag-of (typed-list-nth [:list [:ref :kir/v]] xs j))) (recur (inc j)) false)))))
+
+(defn- cp-width [cp :i64] :i64
+  (cond (< cp 128) 1 (< cp 2048) 2 (< cp 65536) 3 :else 4))
+
+;; OFF in [0, byte-length]: is it the start of a code point (or the end)?
+(defn- utf8-boundary? [s :string off :i64] :bool
+  (let [n (string-byte-length s)]
+    (loop [i 0]
+      (cond
+        (= i off) true
+        (> i off) false
+        (>= i n) false
+        :else (recur (+ i (cp-width (string-code-point-at s i))))))))
+
+(defn- count-str [s :string needle :string] :i64
+  (- (string-split-count s needle) 1))
+
+(defn- str-val [s :string fuel :i64] [:ref :kir.interp/res]
+  (r-val (kv/string-value s) fuel))
+
+(defn- int-val [n :i64 fuel :i64] [:ref :kir.interp/res]
+  (r-val (kv/i64-value n) fuel))
+
+(defn- i64->str [n :i64] :string (string-from-i64 n))
+
+(defn- ev-string-concat [a :string b :string fuel :i64] [:ref :kir.interp/res]
+  (if (> (+ (string-byte-length a) (string-byte-length b)) (str-limit))
+    (r-trap fuel "string-too-large")
+    (str-val (string-concat a b) fuel)))
+
+(defn- ev-substring [s :string start :i64 end :i64 fuel :i64] [:ref :kir.interp/res]
+  (let [n (string-byte-length s)]
+    (cond
+      (or (< start 0) (or (> start end) (> end n))) (r-trap fuel "string-index-out-of-bounds")
+      (not (and (utf8-boundary? s start) (utf8-boundary? s end))) (r-trap fuel "string-splits-code-point")
+      :else (str-val (string-substring s start end) fuel))))
+
+(defn- ev-code-point-at [s :string off :i64 fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (or (< off 0) (>= off (string-byte-length s))) (r-trap fuel "string-index-out-of-bounds")
+    (not (utf8-boundary? s off)) (r-trap fuel "string-splits-code-point")
+    :else (int-val (string-code-point-at s off) fuel)))
+
+(defn- ev-replace-all [s :string needle :string rep :string fuel :i64] [:ref :kir.interp/res]
+  (if (= 0 (string-byte-length needle))
+    (r-trap fuel "empty-string-replacement-needle")
+    (let [total (+ (string-byte-length s)
+                   (* (count-str s needle) (- (string-byte-length rep) (string-byte-length needle))))]
+      (if (> total (str-limit))
+        (r-trap fuel "string-too-large")
+        (str-val (string-replace-all s needle rep) fuel)))))
+
+(defn- ev-index-of-from [h :string needle :string from :i64 fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (= 0 (string-byte-length needle)) (r-trap fuel "empty-string-search-needle")
+    (or (< from 0) (> from (string-byte-length h))) (r-trap fuel "string-index-out-of-bounds")
+    (not (utf8-boundary? h from)) (r-trap fuel "string-splits-code-point")
+    :else (int-val (string-index-of-from h needle from) fuel)))
+
+(defn- ev-string2 [op :i64 a :string b :string fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (= op 42) (ev-string-concat a b fuel)
+    (= op 43) (r-val (kv/bool-value (string=? a b)) fuel)
+    (= op 51) (int-val (string-compare a b) fuel)
+    (= 0 (string-byte-length b))
+    (r-trap fuel (if (= op 50) "empty-string-split-separator" "empty-string-search-needle"))
+    (= op 47) (r-val (kv/bool-value (>= (string-index-of a b) 0)) fuel)
+    (= op 48) (int-val (string-index-of a b) fuel)
+    :else (int-val (string-split-count a b) fuel)))
+
+;; 40-53 over the evaluated arguments
+(defn- ev-string [op :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [sig (op-sig op)]
+    (cond
+      (not (= (vector-count xs) (string-byte-length sig))) (r-trap fuel "arity-mismatch")
+      (not (sig-ok? sig xs)) (r-trap fuel "value-type-mismatch")
+      (or (= op 40) (= op 41)) (int-val (string-byte-length (str-arg xs 0)) fuel)
+      (= op 52) (str-val (string-fold-ascii (str-arg xs 0)) fuel)
+      (= op 46) (let [n (arg-n xs 0)]
+                  (str-val (if (= n (min-i64)) "-9223372036854775808" (i64->str n)) fuel))
+      (= op 44) (ev-substring (str-arg xs 0) (arg-n xs 1) (arg-n xs 2) fuel)
+      (= op 45) (ev-code-point-at (str-arg xs 0) (arg-n xs 1) fuel)
+      (= op 49) (ev-replace-all (str-arg xs 0) (str-arg xs 1) (str-arg xs 2) fuel)
+      (= op 53) (ev-index-of-from (str-arg xs 0) (str-arg xs 1) (arg-n xs 2) fuel)
+      :else (ev-string2 op (str-arg xs 0) (str-arg xs 1) fuel))))
+
+;; ---- aggregates: options, results, typed lists, i64 vectors ----
+
+(defn- arg-v [xs [:list [:ref :kir/v]] i :i64] [:ref :kir/v]
+  (typed-list-nth [:list [:ref :kir/v]] xs i))
+
+(defn- desc-arg [ty [:ref :form/r] i :i64] [:ref :form/r]
+  (if (and (form/is-vec? ty) (< i (form/count-of ty))) (form/nth-of ty i) (kw :i64)))
+
+(defn- mismatch [fuel :i64] [:ref :kir.interp/res] (r-trap fuel "value-type-mismatch"))
+
+(defn- agg-typed? [op :i64] :bool (and (>= op 60) (<= op 73)))
+
+(defn- agg-lazy? [op :i64] :bool
+  (or (= op 63) (or (= op 68) (or (= op 69) (or (= op 77) (or (= op 87) (or (= op 91) (= op 92))))))))
+
+;; Number of evaluated (eager) arguments of an aggregate op, -1 when variadic.
+(defn- agg-arity [op :i64] :i64
+  (cond
+    (or (= op 61) (= op 85)) 0
+    (or (= op 60) (or (= op 62) (or (= op 65) (or (= op 66) (or (= op 67) (or (= op 75) (or (= op 80)
+        (or (= op 84) (or (= op 86) (or (= op 88) (or (= op 89) (= op 90)))))))))))) 1
+    (or (= op 72) (or (= op 73) (or (= op 76) (or (= op 78) (or (= op 79) (= op 83)))))) 2
+    (or (= op 81) (= op 82)) 3
+    :else -1))
+
+(defn- slice-values [xs [:list [:ref :kir/v]] from :i64 to :i64] [:list [:ref :kir/v]]
+  (loop [i from acc (kv/no-values)]
+    (if (>= i to) acc (recur (inc i) (kv/append-value acc (arg-v xs i))))))
+
+(defn- all-ty-from? [ty [:ref :form/r] xs [:list [:ref :kir/v]] i :i64] :bool
+  (loop [j i]
+    (if (>= j (vector-count xs)) true
+      (if (type-ok? ty (arg-v xs j)) (recur (inc j)) false))))
+
+(defn- replace-at [xs [:list [:ref :kir/v]] at :i64 v [:ref :kir/v]] [:list [:ref :kir/v]]
+  (loop [i 0 acc (kv/no-values)]
+    (if (>= i (vector-count xs)) acc
+      (recur (inc i) (kv/append-value acc (if (= i at) v (arg-v xs i)))))))
+
+(defn- zeros [n :i64] [:list [:ref :kir/v]]
+  (loop [i 0 acc (kv/no-values)]
+    (if (>= i n) acc (recur (inc i) (kv/append-value acc (kv/i64-value 0))))))
+
+(defn- vec-limit [] :i64 16777216)
+(defn- list-limit [] :i64 16384)
+
+(defn- agg-vector [op :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (= op 74) (if (all-i64-from? xs 0) (r-val (kv/vector-value xs) fuel) (mismatch fuel))
+    (= op 75)
+    (let [v (arg-v xs 0)]
+      (if (or (= 8 (kv/tag-of v)) (= 9 (kv/tag-of v))) (int-val (kv/count-of v) fuel) (mismatch fuel)))
+    (= op 80)
+    (let [n (arg-n xs 0)]
+      (cond
+        (not (i64? (arg-v xs 0))) (mismatch fuel)
+        (or (< n 0) (> n (vec-limit))) (r-trap fuel "vector-alloc-out-of-range")
+        (> n 65536) (r-trap fuel "interpreter-limit")
+        :else (r-val (kv/vector-value (zeros n)) fuel)))
+    (not (= 9 (kv/tag-of (arg-v xs 0)))) (mismatch fuel)
+    :else
+    (let [items (kv/kids-of (arg-v xs 0))
+          cnt (vector-count items)]
+      (cond
+        (= op 83)
+        (cond
+          (not (i64? (arg-v xs 1))) (mismatch fuel)
+          (>= cnt (vec-limit)) (r-trap fuel "vector-too-large")
+          :else (r-val (kv/vector-value (kv/append-value items (arg-v xs 1))) fuel))
+        (not (i64? (arg-v xs 1))) (mismatch fuel)
+        (= op 76)
+        (let [i (arg-n xs 1)]
+          (if (and (>= i 0) (< i cnt)) (r-val (arg-v items i) fuel) (r-trap fuel "vector-index-out-of-range")))
+        (= op 78)
+        (let [k (arg-n xs 1)]
+          (if (and (>= k 0) (<= k cnt))
+            (r-val (kv/vector-value (slice-values items k cnt)) fuel)
+            (r-trap fuel "vector-drop-out-of-range")))
+        (= op 79)
+        (let [k (arg-n xs 1)]
+          (if (and (>= k 0) (<= k cnt))
+            (r-val (kv/vector-value (slice-values items 0 k)) fuel)
+            (r-trap fuel "vector-take-out-of-range")))
+        :else
+        (let [i (arg-n xs 1)]
+          (cond
+            (not (i64? (arg-v xs 2))) (mismatch fuel)
+            (and (>= i 0) (< i cnt)) (r-val (kv/vector-value (replace-at items i (arg-v xs 2))) fuel)
+            :else (r-trap fuel "vector-index-out-of-range")))))))
+
+(defn- agg-list [op :i64 ty [:ref :form/r] xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [ety (desc-arg ty 1)]
+    (cond
+      (= op 71) (if (all-ty-from? ety xs 0) (r-val (kv/list-value xs) fuel) (mismatch fuel))
+      (not (= 8 (kv/tag-of (arg-v xs 0)))) (mismatch fuel)
+      (= op 72)
+      (cond
+        (not (type-ok? ety (arg-v xs 1))) (mismatch fuel)
+        (>= (kv/count-of (arg-v xs 0)) (list-limit)) (r-trap fuel "list-too-large")
+        :else (r-val (kv/list-value (kv/append-value (kv/kids-of (arg-v xs 0)) (arg-v xs 1))) fuel))
+      :else
+      (let [i (arg-n xs 1)
+            items (kv/kids-of (arg-v xs 0))]
+        (cond
+          (not (i64? (arg-v xs 1))) (mismatch fuel)
+          (or (< i 0) (>= i (vector-count items))) (r-trap fuel "list-index-out-of-bounds")
+          :else (r-val (arg-v items i) fuel))))))
+
+;; options and results (typed descriptor TY, or the untyped i64 forms)
+(defn- agg-sum [op :i64 ty [:ref :form/r] xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (or (= op 60) (= op 84))
+    (if (type-ok? (if (= op 60) (desc-arg ty 1) (kw :i64)) (arg-v xs 0))
+      (r-val (kv/some-value (arg-v xs 0)) fuel) (mismatch fuel))
+    (or (= op 61) (= op 85)) (r-val (kv/none-value) fuel)
+    (or (= op 62) (= op 86))
+    (if (= 14 (kv/tag-of (arg-v xs 0)))
+      (r-val (kv/bool-value (= 1 (kv/n-of (arg-v xs 0)))) fuel) (mismatch fuel))
+    (or (= op 65) (= op 88))
+    (if (type-ok? (if (= op 65) (desc-arg ty 1) (kw :i64)) (arg-v xs 0))
+      (r-val (kv/ok-value (arg-v xs 0)) fuel) (mismatch fuel))
+    (or (= op 66) (= op 89))
+    (if (type-ok? (if (= op 66) (desc-arg ty 2) (kw :i64)) (arg-v xs 0))
+      (r-val (kv/err-value (arg-v xs 0)) fuel) (mismatch fuel))
+    :else
+    (if (= 15 (kv/tag-of (arg-v xs 0)))
+      (r-val (kv/bool-value (= 0 (kv/n-of (arg-v xs 0)))) fuel) (mismatch fuel))))
+
+(defn- agg-apply [op :i64 ty [:ref :form/r] xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (let [want (agg-arity op)]
+    (cond
+      (and (>= want 0) (not (= want (vector-count xs)))) (r-trap fuel "arity-mismatch")
+      (or (= op 71) (or (= op 72) (= op 73))) (agg-list op ty xs fuel)
+      (>= op 74) (if (<= op 83) (agg-vector op xs fuel) (agg-sum op ty xs fuel))
+      :else (agg-sum op ty xs fuel))))
+
+;; The payload of an option/result when the fallback is not needed, else -1 / 0 / 1:
+;; 1 selected (payload), 0 fallback, -1 type mismatch.
+(defn- lazy-select [op :i64 xs [:list [:ref :kir/v]]] :i64
+  (let [v (arg-v xs 0)]
+    (cond
+      (or (= op 63) (= op 87)) (if (= 14 (kv/tag-of v)) (if (= 1 (kv/n-of v)) 1 0) -1)
+      (or (= op 68) (= op 91)) (if (= 15 (kv/tag-of v)) (if (= 0 (kv/n-of v)) 1 0) -1)
+      (or (= op 69) (= op 92)) (if (= 15 (kv/tag-of v)) (if (= 1 (kv/n-of v)) 1 0) -1)
+      :else
+      (if (and (= 9 (kv/tag-of v)) (i64? (arg-v xs 1)))
+        (if (and (>= (arg-n xs 1) 0) (< (arg-n xs 1) (kv/count-of v))) 1 0)
+        -1))))
+
+(defn- lazy-payload [op :i64 xs [:list [:ref :kir/v]]] [:ref :kir/v]
+  (if (= op 77)
+    (kv/nth-of (arg-v xs 0) (arg-n xs 1))
+    (kv/nth-of (arg-v xs 0) 0)))
+
+(defn- lazy-fb-type [op :i64 ty [:ref :form/r]] [:ref :form/r]
+  (cond
+    (or (= op 63) (= op 68)) (desc-arg ty 1)
+    (= op 69) (desc-arg ty 2)
+    :else (kw :i64)))
+
+(defn- ev-lazy [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (let [base (if (agg-typed? op) 2 1)
+        nfirst (if (= op 77) 2 1)
+        ty (if (agg-typed? op) (form/nth-of form 1) (kw :i64))]
+    (if (not (= (form/count-of form) (+ base (+ nfirst 1))))
+      (r-trap fuel "arity-mismatch")
+      (let [ar (ev-args-range form base (+ base nfirst) env cx fuel)]
+        (if (not (= 0 (res-kind ar)))
+          ar
+          (let [xs (kv/kids-of (res-value ar))
+                fu (res-fuel ar)
+                sel (lazy-select op xs)]
+            (cond
+              (< sel 0) (mismatch fu)
+              (= sel 1) (r-val (lazy-payload op xs) fu)
+              :else
+              (let [fb (ev-operand (form/nth-of form (+ base nfirst)) env cx fu)]
+                (if (and (= 0 (res-kind fb)) (not (type-ok? (lazy-fb-type op ty) (res-value fb))))
+                  (mismatch (res-fuel fb))
+                  fb)))))))))
+
+(defn- ev-option-match [form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (if (not (= 6 (form/count-of form)))
+    (r-trap fuel "arity-mismatch")
+    (let [r (ev-operand (form/nth-of form 2) env cx fuel)]
+      (cond
+        (not (= 0 (res-kind r))) r
+        (not (= 14 (kv/tag-of (res-value r)))) (mismatch (res-fuel r))
+        (= 1 (kv/n-of (res-value r)))
+        (ev (form/nth-of form 5)
+            (env-bind env (form/symbol-value (form/nth-of form 4)) (kv/nth-of (res-value r) 0))
+            cx (res-fuel r))
+        :else (ev (form/nth-of form 3) env cx (res-fuel r))))))
+
+(defn- ev-result-match [form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (if (not (= 7 (form/count-of form)))
+    (r-trap fuel "arity-mismatch")
+    (let [r (ev-operand (form/nth-of form 2) env cx fuel)]
+      (cond
+        (not (= 0 (res-kind r))) r
+        (not (= 15 (kv/tag-of (res-value r)))) (mismatch (res-fuel r))
+        (= 0 (kv/n-of (res-value r)))
+        (ev (form/nth-of form 4)
+            (env-bind env (form/symbol-value (form/nth-of form 3)) (kv/nth-of (res-value r) 0))
+            cx (res-fuel r))
+        :else
+        (ev (form/nth-of form 6)
+            (env-bind env (form/symbol-value (form/nth-of form 5)) (kv/nth-of (res-value r) 0))
+            cx (res-fuel r))))))
+
+(defn- ev-agg [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (= op 64) (ev-option-match form env cx fuel)
+    (= op 70) (ev-result-match form env cx fuel)
+    (agg-lazy? op) (ev-lazy op form env cx fuel)
+    :else
+    (let [ar (ev-args-range form (if (agg-typed? op) 2 1) (form/count-of form) env cx fuel)]
+      (if (not (= 0 (res-kind ar)))
+        ar
+        (agg-apply op (if (agg-typed? op) (form/nth-of form 1) (kw :i64)) (kv/kids-of (res-value ar)) (res-fuel ar))))))
+
 ;; ---- calls ----
 
 (defn- loop-helper-name? [s :string] :bool
@@ -460,6 +896,7 @@
         (cond
           (<= op 9) (ev-arith op xs fu)
           (<= op 14) (ev-compare op xs fu)
+          (>= op 40) (ev-string op xs fu)
           (= op 28)
           (if (= 1 (vector-count xs))
             (r-val (kv/bool-value (false-value? (typed-list-nth [:list [:ref :kir/v]] xs 0))) fu)
@@ -481,6 +918,7 @@
               t))
           (= op 31) (ev-do-from form 1 env cx fuel)
           (= op 32) (ev (form/nth-of form 1) env cx fuel)
+          (>= op 60) (ev-agg op form env cx fuel)
           (> op 0) (ev-builtin op form env cx fuel)
           :else (ev-call name form env cx fuel))))))
 
@@ -495,6 +933,7 @@
     (cond
       (= t 2) (r-val (kv/i64-value (form/int-value form)) fuel)
       (= t 1) (r-val (kv/bool-value (form/bool-value form)) fuel)
+      (= t 3) (r-val (kv/string-value (form/string-value form)) fuel)
       (= t 5) (ev-symbol form env fuel)
       (= t 6) (if (= 0 (form/count-of form)) (r-trap fuel "unknown-function") (ev-list form env cx fuel))
       :else (r-trap fuel "unsupported-form"))))
@@ -552,7 +991,7 @@
 (defn- expr-ok? [form [:ref :form/r] fns [:ref :form/r]] :bool
   (let [t (form/tag-of form)]
     (cond
-      (or (= t 1) (or (= t 2) (= t 5))) true
+      (or (= t 1) (or (= t 2) (or (= t 3) (= t 5)))) true
       (= t 6)
       (if (and (> (form/count-of form) 0) (form/is-symbol? (form/first-of form)))
         (let [name (form/symbol-value (form/first-of form))]
@@ -561,14 +1000,36 @@
             (string=? name "if") (and (= 4 (form/count-of form)) (all-expr-ok? form 1 fns))
             (string=? name "do") (and (> (form/count-of form) 1) (all-expr-ok? form 1 fns))
             (string=? name "arena-scope") (and (= 2 (form/count-of form)) (all-expr-ok? form 1 fns))
+            (and (ported-op? name) (agg-typed? (op-code name)))
+            (and (> (form/count-of form) 1)
+                 (desc-ok? (form/nth-of form 1))
+                 (desc-shape-ok? (op-code name) (form/nth-of form 1))
+                 (all-expr-ok? form 2 fns))
             (ported-op? name) (all-expr-ok? form 1 fns)
             :else (and (fn-name-in? fns name) (all-expr-ok? form 1 fns))))
         false)
       :else false)))
 
-(defn- type-word-ok? [ty [:ref :form/r]] :bool
-  (and (form/is-keyword? ty)
-       (or (= (form/keyword-value ty) :i64) (= (form/keyword-value ty) :bool))))
+(defn- desc-ok? [ty [:ref :form/r]] :bool
+  (if (form/is-keyword? ty)
+    (let [k (form/keyword-value ty)]
+      (or (= k :i64) (or (= k :bool) (or (= k :string) (or (= k :vector-i64) (or (= k :option-i64) (= k :result-i64)))))))
+    (let [h (desc-head ty)
+          n (form/count-of ty)]
+      (cond
+        (= h :option) (and (= n 2) (desc-ok? (form/nth-of ty 1)))
+        (= h :list) (and (= n 2) (desc-ok? (form/nth-of ty 1)))
+        (= h :result) (and (= n 3) (and (desc-ok? (form/nth-of ty 1)) (desc-ok? (form/nth-of ty 2))))
+        :else false))))
+
+(defn- desc-shape-ok? [op :i64 ty [:ref :form/r]] :bool
+  (let [h (desc-head ty)]
+    (cond
+      (<= op 64) (= h :option)
+      (<= op 70) (= h :result)
+      :else (= h :list))))
+
+(defn- type-word-ok? [ty [:ref :form/r]] :bool (desc-ok? ty))
 
 (defn- types-ok? [pts [:ref :form/r]] :bool
   (or (form/is-nil? pts)

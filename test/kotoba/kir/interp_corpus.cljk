@@ -57,7 +57,15 @@
 (def ported-ops
   '#{let if do arena-scope bool-not + - * quot bit-xor bit-and bit-or min max = < > <= >=
      bit-not i64-shift-left i64-shift-right u64-shift-right i32-wrap u32-wrap i32-wrapping-add
-     i32-wrapping-mul i32-xor i32-shift-left i32-shift-right u32-shift-right xorshift32})
+     i32-wrapping-mul i32-xor i32-shift-left i32-shift-right u32-shift-right xorshift32
+     string-byte-length string-length string-concat string=? string-substring string-code-point-at
+     string-from-i64 string-contains? string-index-of string-replace-all string-split-count
+     string-compare string-fold-ascii string-index-of-from
+     option-some-of option-none-of option-some?-of option-value-of option-match result-ok-of
+     result-err-of result-ok?-of result-value-of result-error-of result-match-of typed-list-new
+     typed-list-conj typed-list-nth vector-new vector-count vector-at vector-get vector-drop
+     vector-take vector-alloc vector-assoc vector-assoc! vector-conj option-some option-none
+     option-some? option-value result-ok result-err result-ok? result-value result-error})
 
 (defn heads [body]
   (->> (tree-seq coll? seq body)
@@ -117,13 +125,71 @@
 (def lits ["0" "1" "2" "3" "7" "10" "31" "32" "63" "64" "-1" "-2" "100" "255" "4294967295" "4294967296"
            "9223372036854775807" "-9223372036854775807" "1000003"])
 
+(def str-lits ["" "a" "abc" "abcabc" "Hello, World" "h\u00e9llo w\u00f6rld" "\ud834\udd1e" "\ud834\udd1eab" "\u65e5\u672c\u8a9e" "aXbXc" "-" "  x  " "ABCxyz"])
+
+(declare gen-expr)
+
+(defn gen-str [rnd depth vars fns]
+  (let [pick (fn [xs] (nth xs (rnd (count xs))))
+        lit (fn [] (pr-str (pick str-lits)))]
+    (if (<= depth 0)
+      (lit)
+      (let [ss #(gen-str rnd (dec depth) vars fns)
+            ii #(if (< (rnd 3) 2) (str (rnd 12)) (gen-expr rnd (dec depth) vars fns))]
+        (case (rnd 9)
+          (0 1) (lit)
+          2 (str "(string-concat " (ss) " " (ss) ")")
+          3 (str "(string-substring " (ss) " " (ii) " " (ii) ")")
+          4 (str "(string-from-i64 " (ii) ")")
+          5 (str "(string-replace-all " (ss) " " (ss) " " (ss) ")")
+          6 (str "(string-fold-ascii " (ss) ")")
+          7 (str "(let [sv " (ss) "] (string-concat sv sv))")
+          8 (str "(if (string=? " (ss) " " (ss) ") " (ss) " " (ss) ")"))))))
+
+(defn gen-str-int [rnd depth vars fns]
+  (let [pick (fn [xs] (nth xs (rnd (count xs))))
+        ss #(gen-str rnd (max 0 (dec depth)) vars fns)
+        ii #(if (< (rnd 3) 2) (str (rnd 12)) (gen-expr rnd (dec depth) vars fns))]
+    (case (rnd 9)
+      0 (str "(string-byte-length " (ss) ")")
+      1 (str "(string-code-point-at " (ss) " " (ii) ")")
+      2 (str "(string-index-of " (ss) " " (ss) ")")
+      3 (str "(string-compare " (ss) " " (ss) ")")
+      4 (str "(if (string=? " (ss) " " (ss) ") " (ii) " " (ii) ")")
+      5 (str "(if (string-contains? " (ss) " " (ss) ") " (ii) " " (ii) ")")
+      6 (str "(string-index-of-from " (ss) " " (ss) " " (ii) ")")
+      7 (str "(string-split-count " (ss) " " (ss) ")")
+      8 (str "(string-length " (ss) ")"))))
+
+(defn gen-agg-int [rnd depth vars fns]
+  (let [ii #(if (< (rnd 3) 2) (str (- (rnd 8) 1)) (gen-expr rnd (max 0 (dec depth)) vars fns))
+        vec3 #(str "(vector-new " (ii) " " (ii) " " (ii) ")")
+        OI "[:option :i64]" RI "[:result :i64 :i64]" LI "[:list :i64]"
+        opt #(if (zero? (rnd 2)) (str "(option-some-of " OI " " (ii) ")") (str "(option-none-of " OI ")"))
+        res #(if (zero? (rnd 2)) (str "(result-ok-of " RI " " (ii) ")") (str "(result-err-of " RI " " (ii) ")"))]
+    (case (rnd 14)
+      0 (str "(vector-at " (vec3) " " (ii) ")")
+      1 (str "(vector-count (vector-conj " (vec3) " " (ii) "))")
+      2 (str "(vector-get " (vec3) " " (ii) " " (ii) ")")
+      3 (str "(vector-at (vector-assoc " (vec3) " " (ii) " " (ii) ") " (ii) ")")
+      4 (str "(vector-count (vector-drop " (vec3) " " (ii) "))")
+      5 (str "(vector-count (vector-take " (vec3) " " (ii) "))")
+      6 (str "(typed-list-nth " LI " (typed-list-conj " LI " (typed-list-new " LI " " (ii) " " (ii) ") " (ii) ") " (ii) ")")
+      7 (str "(option-value-of " OI " " (opt) " " (ii) ")")
+      8 (str "(option-match " OI " " (opt) " " (ii) " x (+ x " (ii) "))")
+      9 (str "(result-value-of " RI " " (res) " " (ii) ")")
+      10 (str "(result-error-of " RI " " (res) " " (ii) ")")
+      11 (str "(result-match-of " RI " " (res) " a (+ a " (ii) ") b (* b " (ii) "))")
+      12 (str "(if (option-some?-of " OI " " (opt) ") " (ii) " " (ii) ")")
+      13 (str "(if (result-ok?-of " RI " " (res) ") " (ii) " " (ii) ")"))))
+
 (defn gen-expr [rnd depth vars fns]
   (let [pick (fn [xs] (nth xs (rnd (count xs))))
         atom-expr (fn [] (if (and (seq vars) (< (rnd 10) 7)) (pick vars) (pick lits)))]
     (if (<= depth 0)
       (atom-expr)
       (let [sub #(gen-expr rnd (dec depth) vars fns)
-            c (rnd 22)]
+            c (rnd 37)]
         (case c
           (0 1 2) (str "(" (pick ["+" "-" "*"]) " " (sub) " " (sub) ")")
           3 (str "(" (pick ["bit-and" "bit-or" "bit-xor" "min" "max"]) " " (sub) " " (sub) ")")
@@ -150,7 +216,9 @@
           19 (str "(loop [i 0 acc " (sub) "] (if (< i " (inc (rnd 6)) ") (recur (inc i) (+ acc (* i " (sub) "))) acc))")
           20 (str "(" (pick ["i32-wrap" "u32-wrap" "xorshift32"]) " " (sub) ")")
           21 (str "(" (pick ["i32-wrapping-add" "i32-wrapping-mul" "i32-xor" "i32-shift-left" "i32-shift-right" "u32-shift-right"]) " "
-                  (sub) " " (if (< (rnd 3) 2) (str (rnd 32)) (sub)) ")"))))))
+                  (sub) " " (if (< (rnd 3) 2) (str (rnd 32)) (sub)) ")")
+          (22 23 24 25 26 27 28 29) (gen-str-int rnd depth vars fns)
+          (30 31 32 33 34 35 36) (gen-agg-int rnd depth vars fns))))))
 
 (defn gen-program [rnd]
   (let [nf (inc (rnd 4))
@@ -190,6 +258,64 @@
    "(defn main [] :i64 (* 9223372036854775807 9223372036854775807))"
    "(defn main [] :i64 (+ 9223372036854775807 1))"
    "(defn main [] :i64 (- -9223372036854775807 2))"
+   "(defn main [] :i64 (string-byte-length \"h\u00e9llo\"))"
+   "(defn main [] :i64 (string-byte-length (string-concat \"ab\" \"cd\")))"
+   "(defn main [] :i64 (string-code-point-at \"h\u00e9llo\" 1))"
+   "(defn main [] :i64 (string-code-point-at \"h\u00e9llo\" 2))"
+   "(defn main [] :i64 (string-code-point-at \"abc\" 3))"
+   "(defn main [] :i64 (string-byte-length (string-substring \"abcdef\" 2 4)))"
+   "(defn main [] :i64 (string-byte-length (string-substring \"abcdef\" 4 2)))"
+   "(defn main [] :i64 (string-byte-length (string-substring \"h\u00e9llo\" 2 4)))"
+   "(defn main [] :bool (string=? (string-from-i64 -42) \"-42\"))"
+   "(defn main [] :bool (string=? (string-from-i64 -9223372036854775808) \"-9223372036854775808\"))"
+   "(defn main [] :i64 (string-index-of \"h\u00e9llo w\u00f6rld\" \"w\u00f6\"))"
+   "(defn main [] :i64 (string-index-of \"abc\" \"\"))"
+   "(defn main [] :bool (string-contains? \"abc\" \"bc\"))"
+   "(defn main [] :bool (string-contains? \"abc\" \"\"))"
+   "(defn main [] :i64 (string-split-count \"a,b,c\" \",\"))"
+   "(defn main [] :i64 (string-split-count \"a,b,c\" \"\"))"
+   "(defn main [] :bool (string=? (string-replace-all \"a-b-c\" \"-\" \"++\") \"a++b++c\"))"
+   "(defn main [] :i64 (string-byte-length (string-replace-all \"abc\" \"\" \"x\")))"
+   "(defn main [] :i64 (string-compare \"abc\" \"abd\"))"
+   "(defn main [] :i64 (string-compare \"b\" \"abd\"))"
+   "(defn main [] :bool (string=? (string-fold-ascii \"ABCxyz\\u00c9\") \"abcxyz\\u00c9\"))"
+   "(defn rep [s :string n :i64] :string (if (<= n 0) s (rep (string-concat s s) (- n 1))))\n(defn main [] :i64 (string-byte-length (rep \"abcd\" 12)))"
+   "(defn rep [s :string n :i64] :string (if (<= n 0) s (rep (string-concat s s) (- n 1))))\n(defn main [] :i64 (string-byte-length (rep \"abcd\" 20)))"
+   "(defn f [s :string] :i64 (string-byte-length s))\n(defn main [] :i64 (f \"hello\"))"
+   "(defn f [s :string i :i64] :string (string-substring s i (+ i 1)))\n(defn main [] :bool (string=? (f \"hello\" 1) \"e\"))"
+   "(defn count-a [s :string] :i64 (loop [i 0 n 0] (if (>= i (string-byte-length s)) n (recur (+ i 1) (if (= (string-code-point-at s i) 97) (+ n 1) n)))))\n(defn main [] :i64 (count-a \"banana bandana\"))"
+   "(defn main [] :i64 (let [o (option-some-of [:option :i64] 5)] (if (option-some?-of [:option :i64] o) (option-value-of [:option :i64] o 0) 1)))"
+   "(defn main [] :i64 (option-value-of [:option :i64] (option-none-of [:option :i64]) 77))"
+   "(defn main [] :i64 (option-match [:option :i64] (option-some-of [:option :i64] 5) 0 x (+ x 100)))"
+   "(defn main [] :i64 (option-match [:option :i64] (option-none-of [:option :i64]) 9 x (+ x 100)))"
+   "(defn main [] :i64 (result-value-of [:result :i64 :i64] (result-ok-of [:result :i64 :i64] 4) 0))"
+   "(defn main [] :i64 (result-error-of [:result :i64 :i64] (result-err-of [:result :i64 :i64] 4) 0))"
+   "(defn main [] :i64 (result-value-of [:result :i64 :i64] (result-err-of [:result :i64 :i64] 4) 55))"
+   "(defn main [] :bool (result-ok?-of [:result :i64 :i64] (result-err-of [:result :i64 :i64] 4)))"
+   "(defn main [] :i64 (result-match-of [:result :i64 :i64] (result-err-of [:result :i64 :i64] 4) v (+ v 1) e (* e 10)))"
+   "(defn main [] :i64 (typed-list-nth [:list :i64] (typed-list-conj [:list :i64] (typed-list-new [:list :i64] 1 2 3) 9) 3))"
+   "(defn main [] :i64 (typed-list-nth [:list :i64] (typed-list-new [:list :i64] 1 2 3) 3))"
+   "(defn main [] :i64 (vector-count (typed-list-new [:list :string] \"a\" \"b\")))"
+   "(defn main [] :i64 (let [v (vector-new 1 2 3)] (+ (vector-count v) (vector-at (vector-conj v 7) 3))))"
+   "(defn main [] :i64 (vector-at (vector-new 1 2 3) 3))"
+   "(defn main [] :i64 (vector-get (vector-new 1 2 3) 5 -1))"
+   "(defn main [] :i64 (vector-get (vector-new 1 2 3) 2 -1))"
+   "(defn main [] :i64 (vector-count (vector-drop (vector-new 1 2 3) 1)))"
+   "(defn main [] :i64 (vector-at (vector-take (vector-new 1 2 3) 2) 1))"
+   "(defn main [] :i64 (vector-count (vector-take (vector-new 1 2 3) 4)))"
+   "(defn main [] :i64 (vector-at (vector-assoc (vector-new 1 2 3) 1 50) 1))"
+   "(defn main [] :i64 (vector-at (vector-alloc 4) 3))"
+   "(defn main [] :i64 (vector-count (vector-alloc -1)))"
+   "(defn main [] :i64 (let [o (option-some 5)] (if (option-some? o) (option-value o 0) 1)))"
+   "(defn main [] :i64 (let [r (result-err 6)] (if (result-ok? r) (result-value r 0) (result-error r 0))))"
+   "(defn sum [v :vector-i64] :i64 (loop [i 0 acc 0] (if (>= i (vector-count v)) acc (recur (+ i 1) (+ acc (vector-at v i))))))\n(defn main [] :i64 (sum (vector-new 4 5 6 7)))"
+   "(defn build [n :i64] :vector-i64 (loop [i 0 v (vector-new)] (if (>= i n) v (recur (+ i 1) (vector-conj v (* i i))))))\n(defn main [] :i64 (vector-at (build 10) 9))"
+   "(defn find [v :vector-i64 x :i64] [:option :i64] (loop [i 0] (if (>= i (vector-count v)) (option-none-of [:option :i64]) (if (= (vector-at v i) x) (option-some-of [:option :i64] i) (recur (+ i 1))))))\n(defn main [] :i64 (option-value-of [:option :i64] (find (vector-new 5 6 7) 7) -1))"
+   "(defn safe-div [a :i64 b :i64] [:result :i64 :i64] (if (= b 0) (result-err-of [:result :i64 :i64] -1) (result-ok-of [:result :i64 :i64] (quot a b))))\n(defn main [] :i64 (result-value-of [:result :i64 :i64] (safe-div 10 0) 99))"
+   "(defn lazy [] :i64 (quot 1 0))\n(defn main [] :i64 (option-value-of [:option :i64] (option-some-of [:option :i64] 3) (lazy)))"
+   "(defn lazy [] :i64 (quot 1 0))\n(defn main [] :i64 (option-value-of [:option :i64] (option-none-of [:option :i64]) (lazy)))"
+   "(defn names [] [:list :string] (typed-list-new [:list :string] \"a\" \"bb\" \"ccc\"))\n(defn main [] :i64 (string-byte-length (typed-list-nth [:list :string] (names) 2)))"
+   "(defn main [] :i64 (let [o (option-some-of [:option :string] \"hey\")] (option-match [:option :string] o 0 s (string-byte-length s))))"
    "(defn main [] :i64 (- 5))"
    "(defn main [] :i64 (min 3 -4))"
    "(defn main [] :bool (< 1 2))"
