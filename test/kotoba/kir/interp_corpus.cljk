@@ -65,7 +65,8 @@
      result-err-of result-ok?-of result-value-of result-error-of result-match-of typed-list-new
      typed-list-conj typed-list-nth vector-new vector-count vector-at vector-get vector-drop
      vector-take vector-alloc vector-assoc vector-assoc! vector-conj option-some option-none
-     option-some? option-value result-ok result-err result-ok? result-value result-error})
+     option-some? option-value result-ok result-err result-ok? result-value result-error
+     bytes-empty bytes-count bytes-at bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes})
 
 (defn heads [body]
   (->> (tree-seq coll? seq body)
@@ -337,6 +338,27 @@
    "(defn main [] :i64 (let [a 1 b (+ a 1) a (* b 10)] (+ a b)))"
    "(defn main [] :i64 (let [x 5] (do (+ x 1) (* x 2))))"
    "(defn gcd [a :i64 b :i64] :i64 (if (= b 0) a (gcd b (rem a b))))\n(defn main [] :i64 (gcd 1071 462))"
+   "(defn main [] :i64 (bytes-count (bytes-empty)))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-count (b)))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-at (b) 3))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-at (b) 5))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-at (b) -1))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-at (bytes-slice (b) 1 3) 1))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-count (bytes-slice (b) 2 2)))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-count (bytes-slice (b) 3 2)))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-count (bytes-slice (b) 0 6)))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-count (bytes-slice (b) -1 2)))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-at (bytes-concat (b) (b)) 7))"
+   "(defn b [] :bytes (bytes-from-vector-i64 (vector-new 9 8 7 255 0)))\n(defn main [] :i64 (bytes-count (bytes-concat (b) (bytes-empty))))"
+   "(defn main [] :i64 (bytes-count (bytes-from-vector-i64 (vector-new 1 256))))"
+   "(defn main [] :i64 (bytes-count (bytes-from-vector-i64 (vector-new 1 -1))))"
+   "(defn main [] :i64 (bytes-count (bytes-from-vector-i64 (vector-new))))"
+   "(defn main [] :i64 (vector-at (vector-i64-from-bytes (bytes-from-vector-i64 (vector-new 4 5 6))) 2))"
+   "(defn main [] :i64 (vector-count (vector-i64-from-bytes (bytes-from-vector-i64 (vector-new 4 5 6)))))"
+   "(defn main [] :i64 (vector-count (vector-i64-from-bytes (bytes-empty))))"
+   "(defn sum [b :bytes] :i64 (loop [i 0 acc 0] (if (>= i (bytes-count b)) acc (recur (+ i 1) (+ acc (bytes-at b i))))))\n(defn main [] :i64 (sum (bytes-from-vector-i64 (vector-new 10 20 30 40))))"
+   "(defn rev [b :bytes] :bytes (loop [i (- (bytes-count b) 1) acc (bytes-empty)] (if (< i 0) acc (recur (- i 1) (bytes-concat acc (bytes-slice b i (+ i 1)))))))\n(defn main [] :i64 (bytes-at (rev (bytes-from-vector-i64 (vector-new 1 2 3))) 0))"
+   "(defn main [] :i64 (bytes-count 5))"
    "(defn collatz [n :i64] :i64 (loop [x n steps 0] (if (= x 1) steps (recur (if (= (rem x 2) 0) (quot x 2) (+ (* 3 x) 1)) (+ steps 1)))))\n(defn main [] :i64 (collatz 27))"])
 
 (defn hirs-of-sources [srcs]

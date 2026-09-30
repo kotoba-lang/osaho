@@ -146,6 +146,7 @@
     (string=? s "vector-assoc") 81
     (string=? s "vector-assoc!") 82
     (string=? s "vector-conj") 83
+    (string=? s "vector-i64-from-bytes") 106
     :else 0))
 
 (defn- list-op-code [s :string] :i64
@@ -153,6 +154,16 @@
     (string=? s "typed-list-new") 71
     (string=? s "typed-list-conj") 72
     (string=? s "typed-list-nth") 73
+    :else 0))
+
+(defn- bytes-op-code [s :string] :i64
+  (cond
+    (string=? s "bytes-empty") 100
+    (string=? s "bytes-count") 101
+    (string=? s "bytes-at") 102
+    (string=? s "bytes-slice") 103
+    (string=? s "bytes-concat") 104
+    (string=? s "bytes-from-vector-i64") 105
     :else 0))
 
 (defn- op-code [s :string] :i64
@@ -176,7 +187,7 @@
       (= c 114) (result-op-code s)
       (= c 118) (vector-op-code s)
       (= c 116) (list-op-code s)
-      (= c 98) (cond (string=? s "bit-xor") 5 (string=? s "bit-and") 6 (string=? s "bit-or") 7
+      (= c 98) (cond (string=? s "bit-xor") 5 (and (> n 1) (= (string-code-point-at s 1) 121)) (bytes-op-code s) (string=? s "bit-and") 6 (string=? s "bit-or") 7
                      (string=? s "bit-not") 15 (string=? s "bool-not") 28 :else 0)
       (= c 117) (cond (string=? s "u64-shift-right") 18 (string=? s "u32-wrap") 20
                       (string=? s "u32-shift-right") 26 :else 0)
@@ -316,6 +327,7 @@
       (cond
         (= k :bool) (bool-word? v)
         (= k :string) (= 4 (kv/tag-of v))
+        (= k :bytes) (= 7 (kv/tag-of v))
         (= k :vector-i64) (= 9 (kv/tag-of v))
         (= k :option-i64) (= 14 (kv/tag-of v))
         (= k :result-i64) (= 15 (kv/tag-of v))
@@ -814,6 +826,71 @@
         ar
         (agg-apply op (if (agg-typed? op) (form/nth-of form 1) (kw :i64)) (kv/kids-of (res-value ar)) (res-fuel ar))))))
 
+
+;; ---- :bytes (100-106) ----
+
+(defn- bytes-limit [] :i64 65536)
+
+(defn- bytes-of-v [xs [:list [:ref :kir/v]] i :i64] :bytes (kv/b-of (arg-v xs i)))
+
+(defn- bytes-val [b :bytes fuel :i64] [:ref :kir.interp/res] (r-val (kv/bytes-value b) fuel))
+
+(defn- items-in-range? [items [:list [:ref :kir/v]] i :i64] :bool
+  (loop [j i]
+    (if (>= j (vector-count items)) true
+      (let [n (kv/n-of (arg-v items j))]
+        (if (and (>= n 0) (<= n 255)) (recur (inc j)) false)))))
+
+(defn- fill-vector [v :vector-i64 items [:list [:ref :kir/v]] i :i64] :vector-i64
+  (if (>= i (vector-count items)) v
+    (fill-vector (vector-assoc! v i (kv/n-of (arg-v items i))) items (inc i))))
+
+(defn- bytes->items [b :bytes i :i64 n :i64 acc [:list [:ref :kir/v]]] [:list [:ref :kir/v]]
+  (if (>= i n) acc
+    (bytes->items b (inc i) n (kv/append-value acc (kv/i64-value (bytes-at b i))))))
+
+(defn- bytes-arity [op :i64] :i64
+  (cond (= op 100) 0 (or (= op 101) (or (= op 105) (= op 106))) 1 (= op 103) 3 :else 2))
+
+(defn- bytes-sig-ok? [op :i64 xs [:list [:ref :kir/v]]] :bool
+  (cond
+    (= op 101) (= 7 (kv/tag-of (arg-v xs 0)))
+    (= op 102) (and (= 7 (kv/tag-of (arg-v xs 0))) (i64? (arg-v xs 1)))
+    (= op 103) (and (= 7 (kv/tag-of (arg-v xs 0))) (and (i64? (arg-v xs 1)) (i64? (arg-v xs 2))))
+    (= op 104) (and (= 7 (kv/tag-of (arg-v xs 0))) (= 7 (kv/tag-of (arg-v xs 1))))
+    (= op 105) (= 9 (kv/tag-of (arg-v xs 0)))
+    (= op 106) (= 7 (kv/tag-of (arg-v xs 0)))
+    :else true))
+
+(defn- ev-bytes [op :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]
+  (cond
+    (not (= (bytes-arity op) (vector-count xs))) (r-trap fuel "arity-mismatch")
+    (not (bytes-sig-ok? op xs)) (mismatch fuel)
+    (= op 100) (bytes-val (bytes-empty) fuel)
+    (= op 101) (int-val (bytes-count (bytes-of-v xs 0)) fuel)
+    (= op 102)
+    (let [b (bytes-of-v xs 0) i (arg-n xs 1)]
+      (if (and (>= i 0) (< i (bytes-count b))) (int-val (bytes-at b i) fuel) (r-trap fuel "bytes/index-out-of-range")))
+    (= op 103)
+    (let [b (bytes-of-v xs 0) s (arg-n xs 1) e (arg-n xs 2)]
+      (if (and (>= s 0) (and (<= s e) (<= e (bytes-count b))))
+        (bytes-val (bytes-slice b s e) fuel)
+        (r-trap fuel "bytes/slice-bounds")))
+    (= op 104)
+    (let [a (bytes-of-v xs 0) b (bytes-of-v xs 1)]
+      (if (> (+ (bytes-count a) (bytes-count b)) (bytes-limit))
+        (r-trap fuel "bytes/too-large")
+        (bytes-val (bytes-concat a b) fuel)))
+    (= op 105)
+    (let [items (kv/kids-of (arg-v xs 0))]
+      (cond
+        (> (vector-count items) (bytes-limit)) (r-trap fuel "bytes/too-large")
+        (not (items-in-range? items 0)) (r-trap fuel "bytes/item-out-of-range")
+        :else (bytes-val (bytes-from-vector-i64 (fill-vector (vector-alloc (vector-count items)) items 0)) fuel)))
+    :else
+    (let [b (bytes-of-v xs 0)]
+      (r-val (kv/vector-value (bytes->items b 0 (bytes-count b) (kv/no-values))) fuel))))
+
 ;; ---- calls ----
 
 (defn- loop-helper-name? [s :string] :bool
@@ -903,6 +980,12 @@
             (r-trap fu "arity-mismatch"))
           :else (ev-unary-or-shift op xs fu))))))
 
+(defn- ev-bytes-call [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
+  (let [ar (ev-args form env cx fuel)]
+    (if (not (= 0 (res-kind ar)))
+      ar
+      (ev-bytes op (kv/kids-of (res-value ar)) (res-fuel ar)))))
+
 (defn- ev-list [form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel :i64] [:ref :kir.interp/res]
   (let [head (form/first-of form)]
     (if (not (form/is-symbol? head))
@@ -918,6 +1001,7 @@
               t))
           (= op 31) (ev-do-from form 1 env cx fuel)
           (= op 32) (ev (form/nth-of form 1) env cx fuel)
+          (>= op 100) (ev-bytes-call op form env cx fuel)
           (>= op 60) (ev-agg op form env cx fuel)
           (> op 0) (ev-builtin op form env cx fuel)
           :else (ev-call name form env cx fuel))))))
@@ -1013,7 +1097,7 @@
 (defn- desc-ok? [ty [:ref :form/r]] :bool
   (if (form/is-keyword? ty)
     (let [k (form/keyword-value ty)]
-      (or (= k :i64) (or (= k :bool) (or (= k :string) (or (= k :vector-i64) (or (= k :option-i64) (= k :result-i64)))))))
+      (or (= k :i64) (or (= k :bool) (or (= k :string) (or (= k :bytes) (or (= k :vector-i64) (or (= k :option-i64) (= k :result-i64))))))))
     (let [h (desc-head ty)
           n (form/count-of ty)]
       (cond
