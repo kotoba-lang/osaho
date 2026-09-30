@@ -25,7 +25,7 @@
   {:kotoba/export [boolean-result-ops capability-contracts descriptor-indices descriptor-table descriptor? encode-descriptor keyword-text primitive-tags scalar-adt-aliases text-bytes uleb utf8]}
   #?(:clj (:require [kotoba.bytes :as kbytes]) :cljs (:require [kotoba.bytes :as kbytes]))
   #?(:kotoba (:schemas {:form/r [:record :form/r [[:tag :i64] [:s :string] [:n :i64] [:k :keyword]
-                                          [:kids [:list [:ref :form/r]]]]]
+                                          [:kids [:list [:ref :form/r]]] [:span :i64] [:data :bytes]]]
                                  :form/rd [:record :form/rd [[:form [:ref :form/r]] [:pos :i64]]]})))
 
 #?(:kotoba
@@ -50,7 +50,7 @@
 
 #?(:kotoba
    (defn- form-mk [t :i64 s :string n :i64 k :keyword kids [:list [:ref :form/r]]] [:ref :form/r]
-     (record-new [:ref :form/r] t s n k kids)))
+     (record-new [:ref :form/r] t s n k kids 0 (bytes-empty))))
 
 #?(:kotoba
    (defn- form-nil-form [] [:ref :form/r] (form-mk 0 "" 0 :none (form-no-forms))))
