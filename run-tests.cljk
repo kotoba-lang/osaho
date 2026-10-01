@@ -22,6 +22,8 @@
             [kotoba.kir-budgets-test]
             ;; aggregate ABI v8: recursive / generic ADT handles on native
             [kotoba.kir-native-recursive-adt-test]
+            ;; lists of aggregate handles, :bytes members, record-assoc on native
+            [kotoba.kir-native-aggregate-list-test]
             [kotoba.kir-alpha-normalization-test]
             [kotoba.kir-cljs-i64-ashr-test]
             ;; the six collection primitives the friendly heads had nothing to
@@ -95,6 +97,7 @@
              'kotoba.kir-boundary-validation-test
              'kotoba.kir-budgets-test
              'kotoba.kir-native-recursive-adt-test
+             'kotoba.kir-native-aggregate-list-test
    'kotoba.kir-alpha-normalization-test
              'kotoba.kir-cljs-i64-ashr-test
              'kotoba.kir-collection-primitive-test

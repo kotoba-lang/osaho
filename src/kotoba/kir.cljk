@@ -377,6 +377,10 @@
 (def ^:private max-native-aggregate-members 32)
 (def ^:private max-native-aggregate-depth 32)
 
+(def ^:private native-aggregate-member-handle-types
+  "Context-owned handle types an aggregate may hold as a member."
+  #{:bytes :vector-i64})
+
 (declare native-handle-type?)
 
 (defn- native-member-list? [members depth seen]
@@ -395,6 +399,13 @@
    (and (<= depth max-native-aggregate-depth)
         (or (native-word-value-type? type)
             (native-scalar-record-type? type)
+            ;; A context-owned vector-arena handle (`:bytes`, `:vector-i64`) is
+            ;; one word like a pair handle, so a record field or a list item
+            ;; may hold one. The handle lives in the call context's arena for
+            ;; the same extent as the pair cells that point at it. It still
+            ;; cannot cross an EXPORT inside an aggregate: the loader codec
+            ;; builds only top-level handles (`native-export-codec-types`).
+            (contains? native-aggregate-member-handle-types type)
             (and (vector? type) (seq type)
                  (case (first type)
                    :ref (and (= 2 (count type)) (keyword? (second type))
@@ -413,6 +424,15 @@
                                         (second type)))
                    :option (and (= 2 (count type))
                                 (native-handle-type? (second type) (inc depth) seen))
+                   ;; A list of aggregate handles: the vector arena's items are
+                   ;; machine words and a record/variant/option handle IS one
+                   ;; word, so `[:list [:ref :form/r]]` needs no representation
+                   ;; of its own (docs/selfhost-native-aggregate-lists-design.md).
+                   ;; Only the list: `typed-list-new/conj/nth` and `vector-count`
+                   ;; never compare items. A `[:set T]` of handles stays refused
+                   ;; because membership would compare cells, not values.
+                   :list (and (= 2 (count type))
+                              (native-handle-type? (second type) (inc depth) seen))
                    :result (and (= 3 (count type))
                                 (native-handle-type? (second type) (inc depth) seen)
                                 (native-handle-type? (nth type 2) (inc depth) seen))
@@ -824,6 +844,18 @@
                          (keyword? field)
                          (some #(= field (first %)) (nth type 2))
                          (walk value)))
+                  ;; Functional update: the same schema/field shape as the
+                  ;; projection above; both operands are walked. The backend
+                  ;; rebuilds the record (kotoba-native `normalize-surface-
+                  ;; operations`), `kotoba.verifier` re-derives the check.
+                  (= op 'record-assoc)
+                  (let [[type value field replacement] args]
+                    (and (= 4 (count args))
+                         (or (native-scalar-record-type? type)
+                             (native-aggregate-of? :record type))
+                         (keyword? field)
+                         (some #(= field (first %)) (nth type 2))
+                         (walk value) (walk replacement)))
                   ;; Construction: the tag must be a declared case (frontend
                   ;; already enforces this too, unconditionally, via
                   ;; `infer-expression-type`'s own "variant constructor tag
@@ -1191,19 +1223,19 @@
                   (= op 'typed-list-new)
                   (let [[type & items] args]
                     (and (vector? type) (= :list (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (every? walk items)))
                   (= op 'typed-list-conj)
                   (let [[type value item] args]
                     (and (= 3 (count args))
                          (vector? type) (= :list (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (walk value) (walk item)))
                   (= op 'typed-list-nth)
                   (let [[type & rest] args]
                     (and (= 3 (count args))
                          (vector? type) (= :list (first type))
-                         (native-word-value-type? type)
+                         (native-handle-type? type)
                          (every? walk rest)))
 
                   ;; `string-contains?` / `string-replace-all` are admitted for
