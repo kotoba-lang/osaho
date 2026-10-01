@@ -493,8 +493,16 @@
    [[:revision :i64] [:target :keyword] [:kind :keyword] [:value :string]]])
 (def ^:private native-ui-event-result-type [:option native-ui-event-type])
 
-(defn- native-provider-contract? [cap-id request-type result-type]
-  (or (and (= 7 cap-id)
+(defn- host-cap-id
+  "A capability id as a host number. nbb reads a KIR i64 literal as a BigInt, and
+  `(= 35 35n)` is false there, so every equality on an id goes through this."
+  [cap-id]
+  #?(:clj cap-id
+     :cljs (if (i64/bigint-value? cap-id) (js/Number cap-id) cap-id)))
+
+(defn- native-provider-contract? [raw-cap-id request-type result-type]
+  (let [cap-id (host-cap-id raw-cap-id)]
+   (or (and (= 7 cap-id)
            (= native-clock-request-type request-type)
            (= native-clock-result-type result-type))
       (and (= 24 cap-id)
@@ -505,7 +513,7 @@
            (= native-ui-commit-result-type result-type))
       (and (= 10 cap-id)
            (= native-ui-event-request-type request-type)
-           (= native-ui-event-result-type result-type))))
+           (= native-ui-event-result-type result-type)))))
 
 (defn- native-word-value-type?
   "Types whose runtime value fits the native backend's uniform 64-bit word.
@@ -908,7 +916,7 @@
                              ;; of the file wire. Bytes are one-word vector-arena
                              ;; handles; the loader bridges them to the file
                              ;; providers (kexe_loader.c, typed kinds 8 and 9).
-                             (and (= 35 cap-id)
+                             (and (= 35 (host-cap-id cap-id))
                                   (contains? #{[:string :bytes] [:bytes :bytes]}
                                              [request-type result-type])))
                          (walk request)))

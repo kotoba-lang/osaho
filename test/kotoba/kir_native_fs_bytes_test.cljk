@@ -22,3 +22,12 @@
   (is (false? (kir/only-native-word-typed-features? (hir 36 :bytes :bytes '(bytes-empty)))))
   (is (false? (kir/only-native-word-typed-features? (hir 35 :bytes :string '(bytes-empty)))))
   (is (false? (kir/only-native-word-typed-features? (hir 35 :i64 :bytes 1)))))
+
+#?(:cljs
+   (deftest an-i64-literal-capability-id-is-compared-as-a-number
+     ;; nbb reads every KIR integer token as a BigInt, and (= 35 35n) is false: the id of
+     ;; a real compile must reach the same decision as the host number in the tests above.
+     (is (true? (kir/only-native-word-typed-features?
+                 (hir (js/BigInt 35) :string :bytes "/tmp/a"))))
+     (is (false? (kir/only-native-word-typed-features?
+                  (hir (js/BigInt 34) :string :bytes "/tmp/a"))))))
