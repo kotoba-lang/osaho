@@ -903,7 +903,14 @@
                                           [:option-i64 :option-i64]
                                           [:result-i64 :result-i64]}
                                         [request-type result-type])
-                             (native-provider-contract? cap-id request-type result-type))
+                             (native-provider-contract? cap-id request-type result-type)
+                             ;; fs/app-data-bytes (wire 35): the :bytes payload
+                             ;; of the file wire. Bytes are one-word vector-arena
+                             ;; handles; the loader bridges them to the file
+                             ;; providers (kexe_loader.c, typed kinds 8 and 9).
+                             (and (= 35 cap-id)
+                                  (contains? #{[:string :bytes] [:bytes :bytes]}
+                                             [request-type result-type])))
                          (walk request)))
                   ;; f64 scalar arithmetic on native (ADR-2608030300). Same
                   ;; reasoning as `i32-operations` above: no new value
