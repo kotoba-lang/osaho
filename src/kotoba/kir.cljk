@@ -1340,6 +1340,15 @@
                   ;; Not admitted: document-f64 / document-f64-value (native
                   ;; has no f64 text), document-sha256, document-print /
                   ;; document-read (canonical bytes as hex).
+                  ;; `(document-symbol (symbol text))`: the one position where
+                  ;; native admits the `symbol` operation. A symbol is the text
+                  ;; of its name (kotoba-native drops the wrapper and the
+                  ;; document helper validates the name), so the operand is the
+                  ;; text expression itself.
+                  (and (= op 'document-symbol) (= 1 (count args))
+                       (seq? (first args)) (= 'symbol (first (first args)))
+                       (= 2 (count (first args))))
+                  (walk (second (first args)))
                   (contains? native-document-operation-arities op)
                   (let [arity (get native-document-operation-arities op)]
                     (and (cond (= :even arity) (even? (count args))
