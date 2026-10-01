@@ -379,6 +379,10 @@
 
 (declare native-handle-type?)
 
+(def ^:private native-map-key-types
+  "Key types of a native `[:map K V]`: one word each, compared by content."
+  #{:i64 :bool :string :keyword})
+
 (defn- native-member-list? [members depth seen]
   (and (vector? members) (<= 1 (count members) max-native-aggregate-members)
        (every? #(and (vector? %) (= 2 (count %)) (keyword? (first %))
@@ -419,6 +423,14 @@
                    ;; one word, a record handle through `[:ref q]` included.
                    :list (and (= 2 (count type))
                               (native-handle-type? (second type) (inc depth) seen))
+                   ;; `[:map K V]` is the same word arena, keys and values
+                   ;; interleaved (amu ADR 0353 floor :native-hiccup-node). A
+                   ;; key is a scalar whose equality native code already has
+                   ;; -- a word compare for i64 / bool, `string=?` for a
+                   ;; string or keyword -- and a value any one-word handle.
+                   :map (and (= 3 (count type))
+                             (contains? native-map-key-types (second type))
+                             (native-handle-type? (nth type 2) (inc depth) seen))
                    :result (and (= 3 (count type))
                                 (native-handle-type? (second type) (inc depth) seen)
                                 (native-handle-type? (nth type 2) (inc depth) seen))
@@ -1232,6 +1244,27 @@
                     (and (= 3 (count args))
                          (native-aggregate-of? :list type)
                          (walk value) (walk index)))
+                  ;; `[:map K V]` (amu ADR 0353 floor :native-hiccup-node):
+                  ;; the list's word arena with keys and values interleaved,
+                  ;; searched by a helper kotoba-native emits, so the hiccup
+                  ;; elem's `[:map :keyword :string]` attrs cross a native
+                  ;; function boundary. Entry order is not observable here:
+                  ;; `typed-map-entry-at`, `keys` and `vals` stay hosted, and
+                  ;; there is no `typed-map-equal` -- equality over a map
+                  ;; handle stays refused.
+                  (= op 'typed-map-new)
+                  (let [[type & entries] args]
+                    (and (native-aggregate-of? :map type)
+                         (even? (count entries))
+                         (every? walk entries)))
+                  (contains? '#{typed-map-count typed-map-contains typed-map-get
+                                typed-map-assoc typed-map-dissoc} op)
+                  (let [[type & rest] args]
+                    (and (= (count args)
+                            (get '{typed-map-count 2 typed-map-contains 3 typed-map-get 3
+                                   typed-map-assoc 4 typed-map-dissoc 3} op))
+                         (native-aggregate-of? :map type)
+                         (every? walk rest)))
 
                   ;; `string-contains?` / `string-replace-all` are admitted for
                   ;; exactly the reason `i32-operations` and the `vector-*`
