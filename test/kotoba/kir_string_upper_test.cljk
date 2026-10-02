@@ -31,13 +31,19 @@
   (is (= "ABC" (ir/execute upper-kir 'up ["aBc"]))))
 
 (deftest string-upper-is-bounded
-  ;; A result over the typed string byte limit (65536 UTF-8 bytes) must trap,
-  ;; mirroring string-fold-case's bounded-string! wrap. 70000 ASCII bytes is
-  ;; over the limit; a 40000-byte string is under it and must pass.
-  (let [big (apply str (repeat 70000 "x"))
+  ;; A result over the typed string byte limit (string-value-byte-limit, 8 MiB
+  ;; since amu ADR 0362) must trap, mirroring string-fold-case's
+  ;; bounded-string! wrap. An argument that large exceeds the default 1 MiB
+  ;; boundary budget first, so the run names its own budget; a string one
+  ;; byte under the limit is accepted and upper-cased.
+  (let [limit 8388608
+        budget {:boundary-budget {:nodes 65536 :bytes (* 2 limit)}}
+        big (apply str (repeat (inc limit) "x"))
         ok (apply str (repeat 40000 "x"))]
     (is (thrown? #?(:clj Exception :cljs js/Error)
-                 (ir/execute upper-kir 'up [big])))
-    ;; the upper-case of the under-limit string is under the limit too
+                 (ir/execute upper-kir 'up [big] budget)))
+    (is (= (count (apply str (repeat limit "x")))
+           (count (ir/execute upper-kir 'up [(apply str (repeat limit "x"))] budget))))
+    ;; the upper-case of a small string is unchanged by the bound
     (is (= (apply str (repeat 40000 "X"))
            (ir/execute upper-kir 'up [ok])))))

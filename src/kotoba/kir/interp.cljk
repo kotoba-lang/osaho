@@ -589,7 +589,7 @@
 ;; offsets). A Kotoba builtin ABORTS on a bad offset, so every precondition the
 ;; host checks is checked here first and answered as a trap VALUE.
 
-(defn- str-limit [] :i64 65536)
+(defn- str-limit [] :i64 8388608)  ; kotoba.kir.value/string-value-byte-limit (amu ADR 0362)
 
 (defn- str-arg [xs [:list [:ref :kir/v]] i :i64] :string
   (kv/s-of (typed-list-nth [:list [:ref :kir/v]] xs i)))
@@ -919,7 +919,7 @@
 
 ;; ---- :bytes (100-106) ----
 
-(defn- bytes-limit [] :i64 65536)
+(defn- bytes-limit [] :i64 8388608)  ; kotoba.kir.value/bytes-value-byte-limit (amu ADR 0362)
 
 (defn- bytes-of-v [xs [:list [:ref :kir/v]] i :i64] :bytes (kv/b-of (arg-v xs i)))
 

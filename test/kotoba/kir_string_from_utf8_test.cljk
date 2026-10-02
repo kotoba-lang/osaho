@@ -65,11 +65,13 @@
   (is (= :bytes/item-out-of-range (trap (utf8 0x41 -1))))
   (is (= 3 (w (run :i64 '(bytes-count (bytes-from-vector-i64 (vector-new 1 2 3)))))))
   (is (= [1 2 255] (mapv w (run :vector-i64 '(vector-i64-from-bytes (bytes-from-vector-i64 (vector-new 1 2 255))))))))
-  (testing "65536 items is the bound; one more is refused by name"
-    (is (= 65536 (w (run :i64 '(bytes-count (bytes-from-vector-i64 (vector-alloc 65536)))))))
-    (is (= :bytes/too-large
-           (try (run :i64 '(bytes-count (bytes-from-vector-i64 (vector-alloc 65537)))) nil
-                (catch #?(:clj Throwable :cljs :default) e (:trap (ex-data e)))))))
+  (testing "bytes-value-byte-limit items is the bound (8 MiB, amu ADR 0362); one more is refused by name"
+    (let [limit value/bytes-value-byte-limit]
+      (is (= 8388608 limit))
+      (is (= limit (w (run :i64 (list 'bytes-count (list 'bytes-from-vector-i64 (list 'vector-alloc limit)))))))
+      (is (= :bytes/too-large
+             (try (run :i64 (list 'bytes-count (list 'bytes-from-vector-i64 (list 'vector-alloc (inc limit))))) nil
+                  (catch #?(:clj Throwable :cljs :default) e (:trap (ex-data e))))))))
 
 (deftest the-bytes-reads-run-on-the-reference
   (is (= 200 (w (run :i64 '(bytes-at (bytes-from-vector-i64 (vector-new 7 200)) 1)))))
@@ -80,8 +82,10 @@
                                 (catch #?(:clj Throwable :cljs :default) e (:trap (ex-data e)))))]
     (is (= :bytes/index-out-of-range (refused '(bytes-at (bytes-from-vector-i64 (vector-new 1)) 1))))
     (is (= :bytes/slice-bounds (refused '(bytes-count (bytes-slice (bytes-from-vector-i64 (vector-new 1 2)) 2 1)))))
-    (is (= :bytes/too-large (refused '(bytes-count (bytes-concat (bytes-from-vector-i64 (vector-alloc 65536))
-                                                                  (bytes-from-vector-i64 (vector-new 0)))))))))
+    (is (= :bytes/too-large (refused (list 'bytes-count
+                                           (list 'bytes-concat
+                                                 (list 'bytes-from-vector-i64 (list 'vector-alloc value/bytes-value-byte-limit))
+                                                 '(bytes-from-vector-i64 (vector-new 0)))))))))
 
 (deftest the-string-is-charged-to-the-bytes-budget
   (is (= "abc" (run :string (utf8 0x61 0x62 0x63) {:bytes 3})))

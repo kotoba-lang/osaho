@@ -6,25 +6,34 @@
   #?(:clj (:import [java.nio.charset StandardCharsets]
                    [java.security MessageDigest])))
 
+;; UTF-8 bytes of one string value: 8 MiB (8 388 608) since 2026-10-02, amu
+;; ADR 0362 (was 64 KiB). A self-built compiler reads each of its sources as
+;; ONE string, and the source admission bound is 8 MiB (amu ADR 0356); a
+;; compiler that could admit a source it could not hold is refusing by
+;; accident. kotoba-lang lang/limits.edn :language/value :string-value-bytes.
 #?(:kotoba
-   (defn string-value-byte-limit [] :i64 65536)
+   (defn string-value-byte-limit [] :i64 8388608)
    :default
-   (def string-value-byte-limit 65536))
-;; A literal is a value: the bound a string may reach at runtime is the bound
-;; a string may be written as. It was 4096 -- 16x below the value bound --
-;; and refused 3 of the compiler'"'"'s own sources (a .wit file held in a def,
-;; 5042 bytes) on the self-host route (measured 2026-09-11, adr-2609111900).
-;; Backends already carry 64 KiB string values, so nothing new is emitted.
+   (def string-value-byte-limit 8388608))
+;; A literal is a value, but the bound a string may be WRITTEN as is a code-size
+;; bound of its own: 64 KiB (it was 4096, 16x below the then value bound, and
+;; refused 3 of the compiler's own sources, a .wit file held in a def, 5042
+;; bytes; measured 2026-09-11, adr-2609111900). It stayed 65536 when the value
+;; bound moved to 8 MiB (amu ADR 0362): literals live in the module's rodata,
+;; which ADR 0359 bounds as a whole. lang/limits.edn :language/static
+;; :string-literal-bytes.
 #?(:kotoba
-   (defn string-literal-byte-limit [] :i64 (string-value-byte-limit))
+   (defn string-literal-byte-limit [] :i64 65536)
    :default
-   (def string-literal-byte-limit string-value-byte-limit))
+   (def string-literal-byte-limit 65536))
 ;; Opaque binary payload bound for kit/runtime `:bytes` (stream-object
-;; max-pull-bytes). Same magnitude as string-value-byte-limit deliberately.
+;; max-pull-bytes). Same magnitude as string-value-byte-limit deliberately: a
+;; source read as :bytes and decoded is the same 8 MiB (amu ADR 0362).
+;; lang/limits.edn :language/value :bytes-value-bytes.
 #?(:kotoba
-   (defn bytes-value-byte-limit [] :i64 65536)
+   (defn bytes-value-byte-limit [] :i64 8388608)
    :default
-   (def bytes-value-byte-limit 65536))
+   (def bytes-value-byte-limit 8388608))
 #?(:kotoba
    (defn keyword-value-byte-limit [] :i64 512)
    :default

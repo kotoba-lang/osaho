@@ -139,11 +139,14 @@
   ;; P2 of adr-2609242100: the old aggregate indirect-byte limit (1 MiB) is
   ;; now the boundary walk's byte budget, with its own trap name.
   (let [type [:list :string]
-        leaf (apply str (repeat value/string-value-byte-limit "a"))
+        ;; 16 leaves of 64 KiB fill the 1 MiB budget exactly. (The budget was
+        ;; 16x the string VALUE bound until amu ADR 0362 moved that bound to
+        ;; 8 MiB; the budget did not move, so one value may now exceed it and
+        ;; a caller that hands one across a boundary names its own budget.)
+        leaf (apply str (repeat 65536 "a"))
         at-limit [type (vec (repeat 16 leaf))]
         over-limit [type (vec (repeat 17 leaf))]]
-    (is (= value/boundary-traversal-byte-limit
-           (* 16 value/string-value-byte-limit)))
+    (is (= value/boundary-traversal-byte-limit (* 16 65536)))
     (is (= at-limit (value/bounded-typed-value! type at-limit)))
     (let [refusal (try (value/bounded-typed-value! type over-limit) nil
                        (catch #?(:clj Exception :cljs :default) e (ex-data e)))]
