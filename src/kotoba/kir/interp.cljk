@@ -623,8 +623,27 @@
         (>= i n) false
         :else (recur (+ i (cp-width (string-code-point-at s i))))))))
 
+;; string-split-count over string-index-of-from (non-overlapping, as kotoba.kir's
+;; evaluator counts): the seed's source route has no string-split-count. SEP non-empty.
+(defn- split-count [s :string sep :string] :i64
+  (let [m (string-byte-length sep)]
+    (loop [from 0 k 1]
+      (let [p (string-index-of-from s sep from)]
+        (if (< p 0) k (recur (+ p m) (+ k 1)))))))
+
+;; string-replace-all over string-index-of-from + string-append-range (left to right,
+;; non-overlapping): the seed's source route has no string-replace-all. NEEDLE non-empty.
+(defn- replace-all [s :string needle :string rep :string] :string
+  (let [m (string-byte-length needle)
+        n (string-byte-length s)]
+    (loop [from 0 acc ""]
+      (let [p (string-index-of-from s needle from)]
+        (if (< p 0)
+          (string-append-range acc s from n)
+          (recur (+ p m) (string-concat (string-append-range acc s from p) rep)))))))
+
 (defn- count-str [s :string needle :string] :i64
-  (- (string-split-count s needle) 1))
+  (- (split-count s needle) 1))
 
 (defn- str-val [s :string fuel :i64] [:ref :kir.interp/res]
   (r-val (kv/string-value s) fuel))
@@ -659,7 +678,7 @@
                    (* (count-str s needle) (- (string-byte-length rep) (string-byte-length needle))))]
       (if (> total (str-limit))
         (r-trap fuel "string-too-large")
-        (str-val (string-replace-all s needle rep) fuel)))))
+        (str-val (replace-all s needle rep) fuel)))))
 
 (defn- ev-index-of-from [h :string needle :string from :i64 fuel :i64] [:ref :kir.interp/res]
   (cond
@@ -677,7 +696,7 @@
     (r-trap fuel (if (= op 50) "empty-string-split-separator" "empty-string-search-needle"))
     (= op 47) (r-val (kv/bool-value (>= (string-index-of a b) 0)) fuel)
     (= op 48) (int-val (string-index-of a b) fuel)
-    :else (int-val (string-split-count a b) fuel)))
+    :else (int-val (split-count a b) fuel)))
 
 ;; 40-53 over the evaluated arguments
 (defn- ev-string [op :i64 xs [:list [:ref :kir/v]] fuel :i64] [:ref :kir.interp/res]

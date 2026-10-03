@@ -94,9 +94,18 @@
          (vector? (get policy :allow (document-null))))))
 
 #?(:kotoba
+   ;; (every? policy-key-ok? ks) as a counted loop (the seed's source route has no every?)
+   (defn- policy-keys-ok? [ks :document] :bool
+     (loop [i 0]
+       (cond
+         (>= i (document-count ks)) true
+         (policy-key-ok? (nth ks i)) (recur (+ i 1))
+         :else false))))
+
+#?(:kotoba
    (defn- policy-ok? [policy :document] :bool
      (and (map? policy)
-          (every? policy-key-ok? (keys policy))
+          (policy-keys-ok? (keys policy))
           (allow-shape-ok? policy))))
 
 #?(:kotoba
@@ -231,14 +240,14 @@
 
 #?(:kotoba
    (defn- merge-doc [a :document b :document] :document
-     (merge a b)))
+     (document-merge a b)))
 
 #?(:kotoba
    (defn- flow-request [flow-policy :document attributes :document] :document
-     (merge
-      (document-map (document-keyword :subject) (get-in attributes [:subject :id] (document-null))
+     (document-merge
+      (document-map (document-keyword :subject) (g (g attributes :subject) :id)
                     (document-keyword :purpose) (g attributes :purpose)
-                    (document-keyword :now) (get-in attributes [:environment :now] (document-null)))
+                    (document-keyword :now) (g (g attributes :environment) :now))
       flow-policy)))
 
 #?(:kotoba
@@ -259,10 +268,10 @@
              supplied-attributes (g policy :attributes)
              attributes (assoc
                          (assoc supplied-attributes :resource
-                                (merge (document-map (document-keyword :effects) required)
+                                (document-merge (document-map (document-keyword :effects) required)
                                        (g supplied-attributes :resource)))
                          :action
-                         (merge (document-map (document-keyword :id) (document-keyword :compiler/admit)
+                         (document-merge (document-map (document-keyword :id) (document-keyword :compiler/admit)
                                               (document-keyword :capabilities) required)
                                 (g supplied-attributes :action)))
              abac-result (abac/evaluate attributes (g policy :abac))
