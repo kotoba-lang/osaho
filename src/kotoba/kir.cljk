@@ -282,7 +282,9 @@
 (defn- native-scalar-record-type? [type]
   (and (vector? type) (= 3 (count type)) (= :record (first type))
        (keyword? (second type)) (some? (namespace (second type)))
-       (vector? (nth type 2)) (seq (nth type 2))
+       ;; No fields is admitted: `{}` passed as an options map (amu ADR 0353
+       ;; floor :options-map-argument), the empty pair chain natively.
+       (vector? (nth type 2))
        ;; A field may also be a record, which the backends FLATTEN into the
        ;; enclosing record's own slots -- recursively -- so a nested record
        ;; still never needs a runtime representation of its own. The criterion

@@ -2174,7 +2174,9 @@
      (let [[_ type-id fields] type]
        (when-not (and (keyword? type-id) (namespace type-id))
          (throw (ex-info "record type id must be a qualified keyword" {:phase :value})))
-       (when-not (and (vector? fields) (seq fields) (<= (count fields) record-field-limit)
+       ;; The record with no fields is `{}` passed as an options map (amu ADR
+       ;; 0353 floor :options-map-argument).
+       (when-not (and (vector? fields) (<= (count fields) record-field-limit)
                       (every? #(and (vector? %) (= 2 (count %)) (keyword? (first %))) fields)
                       (= (count fields) (count (distinct (map first fields)))))
          (throw (ex-info "record fields are invalid" {:phase :value})))
