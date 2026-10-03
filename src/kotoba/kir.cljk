@@ -393,12 +393,18 @@
 (defn- native-handle-type?
   "True when TYPE travels as one native word: a scalar, a pair-backed
   string/option/result, or a record / variant / heterogeneous vector whose
-  members are themselves such words, including through `[:ref ...]`."
+  members are themselves such words, including through `[:ref ...]`.
+  A `:vector-i64` is one word too -- a handle into the context's vector arena
+  -- so it is a member like any other (amu ADR 0353 floor
+  :native-vector-field: browser.text-edit's `:text/selection [start end]`).
+  It stays off `native-boundary-type?`: an aggregate holding one is an
+  internal value, never an export's, as the vector alone already was."
   ([type] (native-handle-type? type 0 #{}))
   ([type depth seen]
    (and (<= depth max-native-aggregate-depth)
         (or (native-word-value-type? type)
             (native-scalar-record-type? type)
+            (= :vector-i64 type)
             (and (vector? type) (seq type)
                  (case (first type)
                    :ref (and (= 2 (count type)) (keyword? (second type))
