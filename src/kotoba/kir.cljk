@@ -167,7 +167,7 @@
      result-ok-of result-err-of result-ok?-of result-value-of result-error-of result-match-of
      variant-new variant-match
      option-some-of option-none-of option-some?-of option-value-of option-match
-     typed-list-new typed-list-nth bytes-empty
+     typed-list-new typed-list-nth typed-list-conj bytes-empty
      bytes-count bytes-at bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes string-from-utf8
      hetero-vector-new hetero-vector-count hetero-vector-at hetero-vector-assoc hetero-vector-equal
      typed-set-new typed-set-count typed-set-contains typed-set-conj typed-set-disj typed-set-equal typed-set-nth
@@ -1252,6 +1252,13 @@
                     (and (= 3 (count args))
                          (native-aggregate-of? :list type)
                          (walk value) (walk index)))
+                  ;; The list builder (amu ADR 0353 floor :empty-vector-field):
+                  ;; the same arena's vector-conj.
+                  (= op 'typed-list-conj)
+                  (let [[type value item] args]
+                    (and (= 3 (count args))
+                         (native-aggregate-of? :list type)
+                         (walk value) (walk item)))
                   ;; `[:map K V]` (amu ADR 0353 floor :native-hiccup-node):
                   ;; the list's word arena with keys and values interleaved,
                   ;; searched by a helper kotoba-native emits, so the hiccup
@@ -1625,7 +1632,7 @@
 (def ^:private cell-constructor-ops
   '#{pair kgraph-assert! map-new map-assoc option-some result-ok result-err
      result-ok-of result-err-of variant-new option-some-of option-none-of
-     hetero-vector-new hetero-vector-assoc typed-list-new typed-set-new
+     hetero-vector-new hetero-vector-assoc typed-list-new typed-list-conj typed-set-new
      typed-set-conj typed-set-disj typed-map-new typed-map-assoc typed-map-dissoc
      record-new record-assoc vector-new vector-conj vector-assoc vector-assoc!
      bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes
@@ -4712,6 +4719,23 @@
           (when (or (neg? index) (>= index (count items)))
             (trap! :list-index-out-of-bounds {:index index :count (count items)}))
           (value/shallow-typed-value! (second type) (nth items index)))
+
+        ;; The list builder (amu ADR 0353 floor :empty-vector-field): `conj`
+        ;; onto a `[:list T]` appends at the end, as Clojure's `conj` does on
+        ;; the vector the source wrote. Bounded by the canonical list's own
+        ;; item limit, a trap past it as `typed-set-conj` traps past its own;
+        ;; one cell, charged where every constructor is.
+        (= op 'typed-list-conj)
+        (let [[type value-form item-form] args
+              list-value (value/shallow-typed-value!
+                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
+              item (value/shallow-typed-value!
+                    (second type)
+                    (eval-expr item-form env functions fuel heap call-stack cap-call))
+              items (second list-value)]
+          (when (>= (count items) value/canonical-list-item-limit)
+            (trap! :list-too-large {:limit value/canonical-list-item-limit}))
+          (value/shallow-typed-value! type [type (conj (vec items) item)]))
 
         (= op 'hetero-vector-count)
         (let [[type value-form] args
