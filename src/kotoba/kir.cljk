@@ -165,6 +165,7 @@
      i64-to-f64-checked i64-to-f64-rounded f64-to-i64-checked f64-to-i64-truncating
      map-new map-get map-assoc
      js-nullish? js-truthy? js-strict-equal? js-typeof js-array? js-bool-value js-undefined
+     js-capture-new js-capture-value
      bool-not option-some option-none option-some? option-value
      result-ok result-err result-ok? result-value result-error
      result-ok-of result-err-of result-ok?-of result-value-of result-error-of result-match-of
@@ -1633,7 +1634,7 @@
 
 ;; The KIR heads that construct an aggregate node, each charged one cell.
 (def ^:private cell-constructor-ops
-  '#{pair kgraph-assert! map-new map-assoc option-some result-ok result-err
+  '#{pair js-capture-new kgraph-assert! map-new map-assoc option-some result-ok result-err
      result-ok-of result-err-of variant-new option-some-of option-none-of
      hetero-vector-new hetero-vector-assoc typed-list-new typed-list-conj typed-set-new
      typed-set-conj typed-set-disj typed-map-new typed-map-assoc typed-map-dissoc
@@ -3513,6 +3514,12 @@
 
 (declare eval-expr read-pair)
 
+(defn- js-capture-handle? [heap handle]
+  ;; Old embedders of eval-expr can still supply an ordinary pair-only heap.
+  (and #?(:clj (integer? handle) :cljs (= "bigint" (js-host/typeOf handle)))
+       (when-let [handles (:js-capture-handles heap)]
+         (contains? @handles handle))))
+
 (defn- validated-closure-param-indexes
   "Validate the internal representation refinement used for parameters that
   carry compiler closure handles. Their ABI type remains i64; the metadata
@@ -3585,7 +3592,10 @@
         #?(:clj (zero? chain) :cljs (i64/k-zero? chain)) nil
         (>= count 5) (trap! :invalid-closure-capture-chain
                             {:position position :max-captures 5})
-        :else (do (read-pair heap chain 0)
+        ;; An opaque cell's first slot is not an integer capture. Validate
+        ;; its arena handle via the tail without interpreting its payload.
+        :else (do (when-not (js-capture-handle? heap chain)
+                    (read-pair heap chain 0))
                   (recur (read-pair heap chain 1) (inc count)))))))
 
 (defn- validate-i64-pair-chain!
@@ -3841,7 +3851,7 @@
     ;; heap index (`index`, interpreter-internal) becomes a kotoba value.
     #?(:clj (inc index) :cljs (i64/->bigint (inc index)))))
 
-(defn- read-pair [heap handle slot]
+(defn- read-pair-slot [heap handle slot]
   #?(:clj
      (when-not (and (integer? handle) (pos? handle)
                     (<= handle (count @(:cells heap))))
@@ -3856,6 +3866,32 @@
   ;; range, and an out-of-range handle already trapped above.
   (let [index #?(:clj (dec handle) :cljs (dec (js/Number handle)))]
     (nth (nth @(:cells heap) index) slot)))
+
+(defn- read-pair [heap handle slot]
+  ;; An opaque capture is stored, never coerced into the ordinary integer
+  ;; pair vocabulary. Its tail retains the existing physical word ABI.
+  (when (and (= slot 0) (js-capture-handle? heap handle))
+    (trap! :js-capture-projection {:operation 'pair-first}))
+  (read-pair-slot heap handle slot))
+
+(defn- allocate-js-capture! [heap value tail]
+  #?(:clj (trap! :js-value-host {:operation 'js-capture-new}) :cljs nil)
+  (when-not (:js-capture-handles heap)
+    (trap! :missing-js-capture-arena {:operation 'js-capture-new}))
+  ;; The historical i64 predicate probes .constructor. This JS boundary
+  ;; accepts only primitive bigint words, including for malformed tails.
+  (when-not #?(:clj (and (integer? tail) (<= Long/MIN_VALUE tail Long/MAX_VALUE))
+               :cljs (and (= "bigint" (js-host/typeOf tail)) (i64/in-i64-range? tail)))
+    (trap! :value-type-mismatch {:expected :i64 :operation 'js-capture-new :tail true}))
+  (let [handle (allocate-pair! heap value tail)]
+    (vswap! (:js-capture-handles heap) conj handle)
+    handle))
+
+(defn- read-js-capture [heap handle]
+  #?(:clj (trap! :js-value-host {:operation 'js-capture-value}) :cljs nil)
+  (when-not (js-capture-handle? heap handle)
+    (trap! :invalid-js-capture-cell {:operation 'js-capture-value}))
+  (read-pair-slot heap handle 0))
 
 ;; kgraph-* (ADR-2607198300): an all-integer EAVT datom store, the native
 ;; (JVM/Node/browser-free, `:x86_64-kotoba-v1`/`:aarch64-kotoba-v1`) analog of
@@ -4102,6 +4138,19 @@
 
         (= op 'pair-first)
         (read-pair heap (eval-expr (first args) env functions fuel heap call-stack cap-call) 0)
+
+        (= op 'js-capture-new)
+        (do
+          (when-not (= 2 (count args))
+            (trap! :js-operation-arity {:operation op :expected 2 :actual (count args)}))
+          (let [[value tail] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
+            (allocate-js-capture! heap value tail)))
+
+        (= op 'js-capture-value)
+        (do
+          (when-not (= 1 (count args))
+            (trap! :js-operation-arity {:operation op :expected 1 :actual (count args)}))
+          (read-js-capture heap (eval-expr (first args) env functions fuel heap call-stack cap-call)))
 
         (= op 'pair-second)
         (read-pair heap (eval-expr (first args) env functions fuel heap call-stack cap-call) 1)
@@ -5900,6 +5949,7 @@
                                           args param-types)
                                     functions
                                     (volatile! fuel) {:cells (volatile! []) :capacity pair-capacity
+                                                      :js-capture-handles (volatile! #{})
                                                       :datoms (volatile! []) :kgraph-capacity kgraph-capacity
                                                       :cells-budget (when cells (volatile! cells))
                                                       :cells-limit cells

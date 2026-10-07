@@ -63,6 +63,7 @@
             [kotoba.kir-js-operations-test]
             [kotoba.kir-js-branding-test]
             [kotoba.kir-js-trampoline-test]
+            [kotoba.kir-js-capture-test]
             ;; boot-scratch: the two heads that name a place in the image
             [kotoba.kir-image-address-test]
             [kotoba.kir-kernel-dequant-dot-test]
@@ -121,6 +122,7 @@
              'kotoba.kir-js-operations-test
              'kotoba.kir-js-branding-test
              'kotoba.kir-js-trampoline-test
+             'kotoba.kir-js-capture-test
              'kotoba.kir-image-address-test
              'kotoba.kir-kernel-dequant-dot-test
              'kotoba.kir-kernel-dot-f32-test
