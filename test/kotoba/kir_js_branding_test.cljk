@@ -1,0 +1,72 @@
+(ns kotoba.kir-js-branding-test
+  (:require [kotoba.test :refer [deftest is]]
+            [kotoba.kir :as kir]
+            [kotoba.kir.js-operations :as operations]
+            [kotoba.kir-js-operations-test :refer [evaluate]]
+            #?(:cljs ["node:vm" :as vm])))
+
+#?(:cljs
+   (deftest branding-and-typeof-preserve-raw-host-semantics
+     (let [reads (atom 0)
+           object #js {}
+           getter #js {}
+           proxy (js/Proxy. #js {} #js {:get (fn [& _] (swap! reads inc) (throw (js/Error. "read")))})
+           array-proxy (js/Proxy. #js [] #js {:get (fn [& _] (swap! reads inc) (throw (js/Error. "array read")))})
+           callable-proxy (js/Proxy. (fn [] nil) #js {:get (fn [& _] (swap! reads inc) (throw (js/Error. "callable read")))})
+           revoked (.revocable js/Proxy #js {} #js {})
+           _ ((.-revoke revoked))
+           _ (aset object "self" object)
+           _ (.defineProperty js/Object getter "valueOf" #js {:get (fn [] (swap! reads inc) (throw (js/Error. "getter")))})
+           _ (.defineProperty js/Object getter js/Symbol.toStringTag #js {:get (fn [] (swap! reads inc) (throw (js/Error. "tag")))})
+           ;; A fixed trusted fixture from a different realm exercises branding,
+           ;; rather than a same-realm instanceof approximation.
+           foreign-array (.runInNewContext vm "[]")
+           cases [[nil "object" false] [js/undefined "undefined" false]
+                  [false "boolean" false] [true "boolean" false]
+                  [0 "number" false] [(- 0.0) "number" false] [js/NaN "number" false]
+                  [(js/BigInt "0") "bigint" false] [(js/BigInt "1") "bigint" false]
+                  ["" "string" false] ["0" "string" false] [js/Infinity "number" false]
+                  [object "object" false] [getter "object" false] [proxy "object" false]
+                  [(js/Symbol "x") "symbol" false] [(fn [] nil) "function" false]
+                  [(js/Array. 3) "object" true] [(js/Uint8Array. 3) "object" false]
+                  [(js/Map.) "object" false] [(js/Object true) "object" false]
+                  [(js/Object "x") "object" false] [(js/Object (js/BigInt "1")) "object" false]
+                  [array-proxy "object" true] [callable-proxy "function" false]
+                  [foreign-array "object" true]]]
+       (doseq [[value type array] cases]
+         (is (= type (operations/type-of value)))
+         (is (= type (evaluate 'js-typeof [value])))
+         (is (= array (operations/array? value)))
+         (is (= array (evaluate 'js-array? [value]))))
+       (is (= "object" (operations/type-of (.-proxy revoked))))
+       (is (= "object" (evaluate 'js-typeof [(.-proxy revoked)])))
+       (doseq [f [#(operations/array? (.-proxy revoked))
+                  #(evaluate 'js-array? [(.-proxy revoked)])]]
+         (is (try (f) false (catch :default e (instance? js/TypeError e)))))
+       (doseq [value [true false]]
+         (is (identical? value (operations/bool-value value)))
+         (is (identical? value (evaluate 'js-bool-value [value]))))
+       (doseq [[value] (remove (fn [[value]] (boolean? value)) cases)]
+         (doseq [f [#(operations/bool-value value) #(evaluate 'js-bool-value [value])]]
+           (is (= :js-operation-type
+                  (try (f) nil (catch :default e (:trap (ex-data e))))))))
+       (is (zero? @reads)))))
+
+(deftest branding-arities-refuse-before-evaluating-operands
+  (doseq [op ['js-typeof 'js-array? 'js-bool-value]
+          args [[] [nil nil]]]
+    (is (= :js-operation-arity
+           (try (evaluate op args) nil
+                (catch #?(:clj Exception :cljs :default) e (:trap (ex-data e)))))))
+  (doseq [op ['js-typeof 'js-array? 'js-bool-value]]
+    (is (= :js-operation-arity
+           (try (kir/eval-expr (list op 'unbound 'unbound) {} {}
+                               (volatile! 100) (atom {}) [] nil)
+                nil
+                (catch #?(:clj Exception :cljs :default) e (:trap (ex-data e))))))))
+
+#?(:clj
+   (deftest other-hosts-refuse-branding-and-injection
+     (doseq [f [#(operations/type-of nil) #(operations/array? nil)
+                #(operations/bool-value true) #(operations/bool-value 0)]]
+       (is (= :js-value-host (try (f) nil (catch Exception e (:trap (ex-data e)))))))))

@@ -77,6 +77,20 @@ and objects compare by identity. Other hosts refuse these operations. This
 reference contract alone does not add source syntax or backend admission;
 those consumers must explicitly implement and qualify the same operations.
 
+The reference interpreter also provides `js-typeof` (`js-value` to `string`),
+`js-array?` (`js-value` to `bool`), and `js-bool-value` (`bool` to `js-value`).
+The typeof result follows JavaScript, including `null` as `object` and callable
+proxies as `function`. Array branding uses `Array.isArray`, recognizes arrays
+from other realms, and preserves its TypeError for revoked proxies. Boolean
+injection accepts only actual booleans, with no truthiness conversion. Other
+hosts refuse all three operations before inspecting their arguments. A static
+local `js_host.mjs` exposes the raw typeof operator to the interpreted CLJK
+reference host; it never evaluates source or reads properties of its argument.
+New finite tests cover boxed primitives, cycles, getters, ordinary/callable/
+revoked proxies, foreign arrays and invalid boolean injection. These reference
+operations still need explicit source and backend contracts before use through
+Amu; they do not grant object fields, mutation, callbacks or ambient services.
+
 Opaque values have no canonical order and cannot be ordered set items or map
 keys, including nested descriptors. Existing canonical value profiles retain
 their checks. This contract does not serialize JS references or grant property
