@@ -105,3 +105,11 @@ propagate unchanged. Return-object coercion hooks are not consulted. The
 ambient override fixture runs in a separate process to preserve the test
 runner's collection machinery. This correction is operator-authored from a
 measured consumer incompatibility, not a new System One generation.
+
+The explicit KIR operation `(js-undefined)` takes no arguments and yields the
+raw opaque JavaScript undefined value. Extra arguments are refused before
+operand evaluation, and non-JS hosts refuse the operation. This is a dedicated
+constant operation, not admission of arbitrary opaque literals. It prepares
+the dependency needed for Mithril-authored CosmoKit noop; source frontend,
+emitter and consumer qualification remain separate. No new System One model
+call produced this runtime extension.
