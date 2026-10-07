@@ -69,6 +69,13 @@ ClojureScript host, boundary and constructor checks preserve the original value
 reads, coercion or copying. It consumes one boundary node and no payload bytes;
 this does not bound the graph retained by that host reference. The embedder owns
 its lifetime and host resources. JVM execution refuses this value type.
+The reference interpreter also provides `js-nullish?`, `js-truthy?`, and
+`js-strict-equal?` over this opaque host ABI. These use JavaScript nullish,
+ToBoolean, and strict-equality semantics, without conversion or property
+reads. NaN differs from itself, positive and negative zero compare equal,
+and objects compare by identity. Other hosts refuse these operations. This
+reference contract alone does not add source syntax or backend admission;
+those consumers must explicitly implement and qualify the same operations.
 
 Opaque values have no canonical order and cannot be ordered set items or map
 keys, including nested descriptors. Existing canonical value profiles retain

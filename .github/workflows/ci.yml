@@ -47,3 +47,30 @@ jobs:
         run: |
           clojure -Sdeps "{:aliases {:dep {:override-deps {io.github.kotoba-lang/${{ github.event.repository.name }} {:local/root \"../dep\"}}}}}" \
             -M:dep:conformance
+
+  opaque-js-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/checkout@v4
+        with:
+          repository: kotoba-lang/org-babashka-nbb
+          ref: 829f0ba11016e925001d80e51f12848c4ad58112
+          path: bootstrap-nbb
+      - name: Install pinned bootstrap engine package requirement
+        working-directory: bootstrap-nbb
+        run: npm install --ignore-scripts --no-save import-meta-resolve@4.2.0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+      - name: Author dependency classpath before JVM-free qualification
+        run: clojure -Spath -M:test > bootstrap-classpath.txt
+      - name: Execute declared portable tests without dependency resolution
+        run: node scripts/test-js-operations.mjs bootstrap-nbb/cli.js bootstrap-classpath.txt

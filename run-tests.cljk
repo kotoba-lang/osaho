@@ -60,6 +60,7 @@
             ;; not compute for a bigint
             [kotoba.kir-i64-order-test]
             [kotoba.kir-value-js-test]
+            [kotoba.kir-js-operations-test]
             ;; boot-scratch: the two heads that name a place in the image
             [kotoba.kir-image-address-test]
             [kotoba.kir-kernel-dequant-dot-test]
@@ -115,6 +116,7 @@
              'kotoba.kir-native-record-update-admission-test
              'kotoba.kir-i64-order-test
              'kotoba.kir-value-js-test
+             'kotoba.kir-js-operations-test
              'kotoba.kir-image-address-test
              'kotoba.kir-kernel-dequant-dot-test
              'kotoba.kir-kernel-dot-f32-test

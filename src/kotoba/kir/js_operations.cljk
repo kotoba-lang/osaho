@@ -1,0 +1,20 @@
+(ns kotoba.kir.js-operations
+  "Pure observations of opaque JS values. No coercion or property access."
+  {:kotoba/export [nullish? truthy? strict-equal?]})
+
+(defn- require-js-host! []
+  #?(:clj (throw (ex-info "opaque JS operations require a JS host"
+                         {:phase :value :trap :js-value-host}))
+     :cljs nil))
+
+(defn nullish? [value]
+  (require-js-host!)
+  #?(:cljs (or (identical? value nil) (identical? value js/undefined)) :clj nil))
+
+(defn truthy? [value]
+  (require-js-host!)
+  #?(:cljs (js/Boolean value) :clj nil))
+
+(defn strict-equal? [left right]
+  (require-js-host!)
+  #?(:cljs (identical? left right) :clj nil))
