@@ -20,12 +20,12 @@ try {
     writeFileSync(join(directory, name), '#!/bin/sh\n: > "$KOTOBA_JVM_MARKER"\nexit 97\n', {mode: 0o755});
   }
   const result = spawnSync(process.execPath, [engine, '--config', config, 'run-tests.cljk'],
-    {cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 120000,
+    {cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 300000,
      env: {...process.env, KOTOBA_JVM_MARKER: marker, PATH: `${directory}:${process.env.PATH || ''}`}});
   process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || '');
   if (existsSync(marker)) throw Error('JVM executable invoked during bootstrap tests');
   if (result.error) throw result.error;
-  if (result.status !== 0 || !/Ran 262 tests containing 2156 assertions\.\s+0 failures, 0 errors\./.test(result.stdout)) {
+  if (result.status !== 0 || !/Ran 263 tests containing 2160 assertions\.\s+0 failures, 0 errors\./.test(result.stdout)) {
     throw Error(`bootstrap suite did not complete its declared checks: ${result.status ?? result.signal}`);
   }
 } finally { rmSync(directory, {recursive: true, force: true}); }

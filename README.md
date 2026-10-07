@@ -97,3 +97,17 @@ their checks. This contract does not serialize JS references or grant property
 access, callbacks, ambient authority, Wasm/native transport, source syntax or
 backend support. Those consumers must explicitly implement or refuse the type.
 The finite Node/nbb test is bootstrap evidence, not compiler selfhost evidence.
+
+The JS array observation normalizes the dynamic Array.isArray return to a
+boolean with intrinsic JavaScript truthiness. Non-bool host overrides preserve
+negation semantics; operand evaluation occurs once and thrown error objects
+propagate unchanged. Return-object coercion hooks are not consulted. The
+ambient override fixture runs in a separate process to preserve the test
+runner's collection machinery. This correction is operator-authored from a
+measured consumer incompatibility, not a new System One generation.
+
+The maintained full bootstrap suite has a bounded 300-second process deadline.
+On the Node22 CI runner, the previous 120-second deadline ended the existing
+oracle-fuel test with ETIMEDOUT; no assertion failure was reported before the
+timeout. This deadline changes neither the selected tests nor their exact
+completion/count guard. Source/compiler guest fuel limits remain unchanged.
