@@ -60,3 +60,19 @@ checkable from outside.
 ```bash
 kbb -M:test
 ```
+
+## Opaque JS host values
+
+`:js-value` is a target-specific opaque leaf for JS interoperability. On the
+ClojureScript host, boundary and constructor checks preserve the original value
+(including undefined, functions, symbols, cycles and proxies) without property
+reads, coercion or copying. It consumes one boundary node and no payload bytes;
+this does not bound the graph retained by that host reference. The embedder owns
+its lifetime and host resources. JVM execution refuses this value type.
+
+Opaque values have no canonical order and cannot be ordered set items or map
+keys, including nested descriptors. Existing canonical value profiles retain
+their checks. This contract does not serialize JS references or grant property
+access, callbacks, ambient authority, Wasm/native transport, source syntax or
+backend support. Those consumers must explicitly implement or refuse the type.
+The finite Node/nbb test is bootstrap evidence, not compiler selfhost evidence.
