@@ -14,7 +14,8 @@
             [kotoba.kir.iq-codebook :as iq]
             [kotoba.kir.decimal :as decimal]
             [kotoba.kir.xml :as xml]
-            #?@(:cljs [[kotoba.kir.cljs-i64 :as i64]])))
+            #?@(:cljs [[kotoba.kir.cljs-i64 :as i64]
+                       ["./kir/js_host.mjs" :as js-host]])))
 
 (def ^:private default-fuel 512)
 
@@ -3757,10 +3758,15 @@
                      :count (count offenders)}))))
 
 (defn- trampoline-call [fname values]
-  {trampoline-tag true :function fname :values values})
+  (let [control {trampoline-tag true :function fname :values values}]
+    #?(:cljs (js-host/registerTrampoline control) :clj control)))
 
 (defn- trampoline-call? [x]
-  (and (map? x) (true? (get x trampoline-tag))))
+  ;; A :js-value result may be a Proxy, including a revoked one. Even map?
+  ;; asks it for CLJS protocol properties. Only controls we allocated may be
+  ;; inspected as maps; weak identity membership does not observe host data.
+  #?(:cljs (js-host/consumeTrampoline x)
+     :clj (and (map? x) (true? (get x trampoline-tag)))))
 
 (defn- invoke-function [function values functions fuel heap call-stack cap-call]
   (when-not function
