@@ -54,6 +54,26 @@
 #?(:clj
    (deftest other-hosts-refuse-opaque-js-predicates
      (doseq [f [#(operations/nullish? nil) #(operations/truthy? false)
-                #(operations/strict-equal? nil nil)]]
+                 #(operations/strict-equal? nil nil) #(operations/undefined-value)]]
        (is (= :js-value-host
               (try (f) nil (catch Exception e (:trap (ex-data e)))))))))
+
+#?(:cljs
+   (deftest explicit-js-undefined-is-a-raw-opaque-result
+     (let [direct (operations/undefined-value)
+           interpreted (evaluate 'js-undefined [])]
+       (is (js/Object.is direct js/undefined))
+       (is (not (js/Object.is direct nil)))
+       (is (js/Object.is interpreted js/undefined))
+       (is (= "undefined" (operations/type-of interpreted)))
+       (is (true? (evaluate 'js-nullish? [interpreted])))
+       (is (true? (evaluate 'js-strict-equal? [interpreted js/undefined]))))))
+
+(deftest js-undefined-refuses-arguments-before-operand-evaluation
+  (doseq [args [['unbound] ['unbound 'unbound]]]
+    (is (= :js-operation-arity
+           (try (kir/eval-expr (apply list 'js-undefined args) {} {}
+                               (volatile! 100) (atom {}) [] nil)
+                nil
+                (catch #?(:clj Exception :cljs :default) e (:trap (ex-data e)))))))
+  (is (contains? kir/non-string-typed-ops 'js-undefined)))
