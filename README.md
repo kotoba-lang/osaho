@@ -113,3 +113,8 @@ constant operation, not admission of arbitrary opaque literals. It prepares
 the dependency needed for Mithril-authored CosmoKit noop; source frontend,
 emitter and consumer qualification remain separate. No new System One model
 call produced this runtime extension.
+The maintained full bootstrap suite has a bounded 300-second process deadline.
+On the Node22 CI runner, the previous 120-second deadline ended the existing
+oracle-fuel test with ETIMEDOUT; no assertion failure was reported before the
+timeout. This deadline changes neither the selected tests nor their exact
+completion/count guard. Source/compiler guest fuel limits remain unchanged.
