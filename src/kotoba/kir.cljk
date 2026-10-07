@@ -10,6 +10,7 @@
   (:require [kotoba.lang.text :as str]
             [kotoba.hir :as hir]
             [kotoba.kir.value :as value]
+            [kotoba.kir.js-operations :as js-operations]
             [kotoba.kir.iq-codebook :as iq]
             [kotoba.kir.decimal :as decimal]
             [kotoba.kir.xml :as xml]
@@ -162,6 +163,7 @@
      f64-eq f64-lt f64-le f64-gt f64-ge f64-unordered
      i64-to-f64-checked i64-to-f64-rounded f64-to-i64-checked f64-to-i64-truncating
      map-new map-get map-assoc
+     js-nullish? js-truthy? js-strict-equal?
      bool-not option-some option-none option-some? option-value
      result-ok result-err result-ok? result-value result-error
      result-ok-of result-err-of result-ok?-of result-value-of result-error-of result-match-of
@@ -4554,6 +4556,16 @@
               result (reduce (fn [current [key item]] (assoc current key item))
                              (value/bounded-map! map-value) (partition 2 values))]
           (value/bounded-map! result))
+
+        (contains? '#{js-nullish? js-truthy? js-strict-equal?} op)
+        (let [arity (if (= op 'js-strict-equal?) 2 1)]
+          (when-not (= arity (count args))
+            (trap! :js-operation-arity {:operation op :expected arity :actual (count args)}))
+          (let [values (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
+            (case op
+              js-nullish? (js-operations/nullish? (first values))
+              js-truthy? (js-operations/truthy? (first values))
+              js-strict-equal? (js-operations/strict-equal? (first values) (second values)))))
 
         (= op 'bool-not)
         (kotoba-false? (eval-expr (first args) env functions fuel heap call-stack cap-call))
