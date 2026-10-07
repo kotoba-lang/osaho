@@ -1,6 +1,7 @@
 (ns kotoba.kir.js-operations
   "Pure observations of opaque JS values. No coercion or property access."
-  {:kotoba/export [nullish? truthy? strict-equal?]})
+  {:kotoba/export [nullish? truthy? strict-equal? type-of array? bool-value]}
+  #?(:cljs (:require ["./js_host.mjs" :as host])))
 
 (defn- require-js-host! []
   #?(:clj (throw (ex-info "opaque JS operations require a JS host"
@@ -18,3 +19,19 @@
 (defn strict-equal? [left right]
   (require-js-host!)
   #?(:cljs (identical? left right) :clj nil))
+
+(defn type-of [value]
+  (require-js-host!)
+  #?(:cljs (host/typeOf value) :clj nil))
+
+(defn array? [value]
+  (require-js-host!)
+  #?(:cljs (js/Array.isArray value) :clj nil))
+
+(defn bool-value [value]
+  (require-js-host!)
+  #?(:cljs (if (boolean? value)
+             value
+             (throw (ex-info "bool-value requires an actual boolean"
+                             {:phase :value :trap :js-operation-type})))
+     :clj nil))
