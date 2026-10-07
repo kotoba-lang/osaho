@@ -25,7 +25,7 @@ try {
   process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || '');
   if (existsSync(marker)) throw Error('JVM executable invoked during bootstrap tests');
   if (result.error) throw result.error;
-  if (result.status !== 0 || !/Ran 267 tests containing 2203 assertions\.\s+0 failures, 0 errors\./.test(result.stdout)) {
+  if (result.status !== 0 || !/Ran 272 tests containing 2251 assertions\.\s+0 failures, 0 errors\./.test(result.stdout)) {
     throw Error(`bootstrap suite did not complete its declared checks: ${result.status ?? result.signal}`);
   }
 } finally { rmSync(directory, {recursive: true, force: true}); }

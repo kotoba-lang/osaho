@@ -133,3 +133,22 @@ typed guest dispatcher results plus 2,000 tail re-entries with opaque data. The
 portable Node/nbb suite passes 267 tests / 2,203 assertions. This fixes interpreter
 opaque return handling; it does not admit host callback calls, JS property access
 or opaque captures, or establish browser-host/self-host or whole-Harness parity.
+
+
+## Opaque JS capture cells (interpreter bootstrap)
+
+`js-capture-new` stores a raw JS value and an i64 chain tail in the existing
+bounded pair arena; `js-capture-value` projects only an allocated typed cell.
+Ordinary `pair-first` refuses its opaque slot. Closure IDs/tails and integer-only
+pairs keep their existing ABI, the five-capture limit and default budgets. Every
+new cell debits constructor fuel/cells and the shared arena capacity. Private
+per-run typed-cell membership checks no properties of the payload or a malformed
+opaque handle; both operations refuse a non-JS interpreter host.
+
+Node/nbb bootstrap qualification on 2026-10-08: five new tests / 48 assertions
+exercise opaque identities (including revoked/throwing proxies), mixed capture
+chains, invalid/ordinary cells, malformed handles with zero reads, allocation
+budgets and capture limits. Script emission and Sema capture lifting are separate
+consumer prerequisites; these operations alone do not qualify persistent escaping
+closures, host callback adaptation, browser-host execution or native selfhost.
+This work is operator-authored; public System One returned HTTP 503.
