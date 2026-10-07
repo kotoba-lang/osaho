@@ -118,3 +118,18 @@ On the Node22 CI runner, the previous 120-second deadline ended the existing
 oracle-fuel test with ETIMEDOUT; no assertion failure was reported before the
 timeout. This deadline changes neither the selected tests nor their exact
 completion/count guard. Source/compiler guest fuel limits remain unchanged.
+
+
+Opaque JS results are now separated from interpreter trampoline controls by
+private weak identity registration. Recognizing a tail-call control no longer
+asks arbitrary return values for CLJS map protocol properties. A revoked Proxy,
+property-trapping Proxy or ordinary map with a trampoline-like tag passes through
+an opaque identity function unchanged. Genuine internal tail controls are consumed
+once, without retaining them strongly. The JVM branch and all existing budgets,
+closure capture ABI and loop-tail admission remain unchanged.
+
+Qualification: two independent JS regressions / 34 assertions cover direct and
+typed guest dispatcher results plus 2,000 tail re-entries with opaque data. The
+portable Node/nbb suite passes 267 tests / 2,203 assertions. This fixes interpreter
+opaque return handling; it does not admit host callback calls, JS property access
+or opaque captures, or establish browser-host/self-host or whole-Harness parity.
