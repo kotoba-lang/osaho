@@ -2118,7 +2118,21 @@
 
 (def ^:private leaf-value-types
   #{:i64 :f32 :f64 :string :keyword :symbol :map :bool :option-i64 :result-i64
-    :vector-i64 :vector-f64 :string-index :disjoint-set-i64 :document :bytes})
+    :vector-i64 :vector-f64 :string-index :disjoint-set-i64 :document :bytes :js-value})
+
+(defn- contains-js-value-type? [type]
+  ;; Descriptors were validated and bounded before this walk. Labels and
+  ;; nominal IDs are not types, even when a field is named :js-value.
+  (or (= :js-value type)
+      (and (vector? type)
+           (boolean
+            (some contains-js-value-type?
+                  (case (first type)
+                    (:option :list :set :stream :task) [(second type)]
+                    (:result :map) [(second type) (nth type 2)]
+                    :vector (second type)
+                    (:record :variant) (map second (nth type 2))
+                    []))))))
 
 (defn validate-value-type!
   ([type] (validate-value-type! type 0 (volatile! 0)))
@@ -2162,6 +2176,9 @@
            (throw (ex-info "direct floating set items are outside the structured scalar ABI"
                            {:phase :value :type type})))
          (validate-value-type! (second type) (inc depth) nodes)
+         (when (contains-js-value-type? (second type))
+           (throw (ex-info "opaque JS values cannot be ordered set items"
+                           {:phase :value :type type :trap :js-value-unordered})))
          type)
      (and (vector? type) (= 3 (count type)) (= :map (first type)))
      (do (when (some #{:f32 :f64} [(second type) (nth type 2)])
@@ -2169,6 +2186,9 @@
                            {:phase :value :type type})))
          (validate-value-type! (second type) (inc depth) nodes)
          (validate-value-type! (nth type 2) (inc depth) nodes)
+         (when (contains-js-value-type? (second type))
+           (throw (ex-info "opaque JS values cannot be ordered map keys"
+                           {:phase :value :type type :trap :js-value-unordered})))
          type)
      (and (vector? type) (= 3 (count type)) (= :record (first type)))
      (let [[_ type-id fields] type]
@@ -2284,6 +2304,8 @@
   "Language-owned total order for already validated values of one type."
   [type left right]
   (case type
+    :js-value (throw (ex-info "opaque JS values have no canonical order"
+                              {:phase :value :type type :trap :js-value-unordered}))
     :i64 (compare-i64 left right)
     :string (compare left right)
     :bytes (let [n (min (bytes-byte-count left) (bytes-byte-count right))]
@@ -2447,6 +2469,11 @@
   resolves to (both are no-ops for a constructor)."
   [type value charge! check-type!]
   (case type
+    ;; A host reference is one opaque leaf. Never inspect its properties,
+    ;; coerce it, copy it or canonicalize its graph (including undefined).
+    :js-value #?(:cljs [:leaf value]
+                 :clj (throw (ex-info "opaque JS values require a JS host"
+                                     {:phase :value :type type :trap :js-value-host})))
     :i64 (do (when-not (i64-value? value)
                (throw (ex-info "value is not a signed i64" {:phase :value})))
              [:leaf value])
@@ -2672,6 +2699,7 @@
   (static) descriptor: never walks into the value."
   [type value]
   (case type
+    :js-value #?(:cljs true :clj false)
     :i64 (i64-value? value)
     :f64 (f64-value? value)
     :f32 (f32-value? value)
