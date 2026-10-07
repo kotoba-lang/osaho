@@ -169,3 +169,51 @@
       (is (= :division-by-zero (:trap outcome))
           (str "a Kotoba trap must pass through the host-stack guard unchanged, got "
                (pr-str outcome))))))
+
+#?(:cljs
+   (deftest host-capability-exceptions-bypass-the-interpreter-resource-classifier
+     (let [classifications (atom 0)
+           classify ir/host-stack-exhausted?
+           throw-factory (js/Function. "value" "return function(){throw value;}")
+           values [(js/RangeError. "Maximum call stack size exceeded")
+                   (js/RangeError. "host range") (js/Error. "host error")
+                   #js {} nil js/undefined false true 0 (- 0.0) js/NaN
+                   "host string" (js/Symbol "host") (js/BigInt "7")]
+           typed {:format :kotoba.kir/v3 :entry nil :exports ['keep]
+                  :functions [{:name 'keep :params ['v] :param-types [:js-value]
+                               :result :js-value
+                               :body '(typed-cap-call 7 :js-value :js-value v)}]}
+           untyped {:format :kotoba.kir/v3 :entry nil :exports ['keep]
+                    :functions [{:name 'keep :params [] :param-types [] :result :i64
+                                 :body '(cap-call 7 0)}]}]
+       (with-redefs [ir/host-stack-exhausted?
+                     (fn [e] (swap! classifications inc) (classify e))]
+         (doseq [value values
+                 [program args option] [[typed [js/undefined] :typed-cap-call]
+                                        [untyped [] :cap-call]]]
+           (let [caught (volatile! [])]
+             (try (ir/execute program 'keep args {option (throw-factory value)})
+                  (catch :default e (vreset! caught [e])))
+             (is (= 1 (count @caught)))
+             (is (js/Object.is (first @caught) value))))
+         (is (zero? @classifications))))))
+
+#?(:cljs
+   (deftest host-exception-provenance-is-local-to-one-execution
+     (let [classifications (atom 0)
+           classify ir/host-stack-exhausted?
+           error (js/RangeError. "Maximum call stack size exceeded")
+           program {:format :kotoba.kir/v3 :entry nil :exports ['keep]
+                    :functions [{:name 'keep :params [] :param-types [] :result :i64
+                                 :body '(quot (cap-call 7 0) 0)}]}
+           throwing ((js/Function. "e" "return function(){throw e;}") error)]
+       (with-redefs [ir/host-stack-exhausted?
+                     (fn [e] (swap! classifications inc) (classify e))]
+         (let [caught (try (ir/execute program 'keep [] {:cap-call throwing})
+                           nil (catch :default e e))]
+           (is (js/Object.is caught error)))
+         (is (= 0 @classifications))
+         (let [caught (try (ir/execute program 'keep [] {:cap-call (fn [& _] 7)})
+                           nil (catch :default e e))]
+           (is (= :division-by-zero (:trap (ex-data caught)))))
+         (is (= 1 @classifications))))))

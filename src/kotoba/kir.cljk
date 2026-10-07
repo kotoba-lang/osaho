@@ -5888,15 +5888,27 @@
    (let [memory-image (let [image (validated-memory memory)]
                         (cond-> image
                           image (assoc :rodata (place-rodata! image (:functions kir)))))
+         ;; Host capabilities may throw any value. Remember its identity in
+         ;; this execution only, so the outer interpreter resource classifier
+         ;; does not inspect it or rewrite a host-provided RangeError.
+         host-failure (volatile! nil)
          cap-dispatch (when (or cap-call typed-cap-call)
                         (fn
                           ([cap-id value]
                            (if cap-call
-                             (cap-call cap-id value)
+                             (try
+                               (cap-call cap-id value)
+                               (catch #?(:clj Throwable :cljs :default) e
+                                 (vreset! host-failure [e])
+                                 (throw e)))
                              (trap! :capability-denied {:capability cap-id})))
                           ([cap-id request-type result-type request]
                            (if typed-cap-call
-                             (typed-cap-call cap-id request-type result-type request)
+                             (try
+                               (typed-cap-call cap-id request-type result-type request)
+                               (catch #?(:clj Throwable :cljs :default) e
+                                 (vreset! host-failure [e])
+                                 (throw e)))
                              (trap! :capability-denied {:capability cap-id :typed true})))))
          functions (into {} (map (juxt :name identity) (:functions kir)))
          function (get functions function-name)
@@ -5975,8 +5987,9 @@
                         (not #?(:clj (zero? value) :cljs (i64/k-zero? value)))
                         value))]
        ;; A host with a small native stack can exhaust that stack just before
-       ;; the fixed Kotoba call budget does. Host resource errors must never
-       ;; escape the language boundary: normalize this one precise failure to
+       ;; the fixed Kotoba call budget does. Interpreter resource errors must
+       ;; never escape the language boundary. Capability-provided exceptions
+       ;; retain their identity; normalize an interpreter failure to
        ;; the same deterministic, fail-closed trap.
        ;;
        ;; BOTH runtimes, and that is the fix rather than the feature. Until
@@ -6012,9 +6025,19 @@
            ;; reading the trap was told the program's budget was spent when
            ;; the host's was. The deterministic bound on call depth is
            ;; `:budget/frames`; this one is whatever the host has.
-           (if (host-stack-exhausted? e)
-             (trap! :host/stack-exhausted {:frames-limit frames})
-             (throw e))))))))
+           (let [failure @host-failure
+                 host-thrown? (and failure
+                                   (let [original (first failure)]
+                                     (or (identical? e original)
+                                         #?(:clj false
+                                            :cljs (and (number? e) (number? original)
+                                                       (not (== e e))
+                                                       (not (== original original)))))))]
+             (if host-thrown?
+               (throw e)
+               (if (host-stack-exhausted? e)
+                 (trap! :host/stack-exhausted {:frames-limit frames})
+                 (throw e))))))))))
 
 (defn oracle-inconclusive-trap
   "The resource trap that stopped an oracle run, or nil when E is anything
