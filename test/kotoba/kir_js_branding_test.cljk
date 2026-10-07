@@ -3,7 +3,9 @@
             [kotoba.kir :as kir]
             [kotoba.kir.js-operations :as operations]
             [kotoba.kir-js-operations-test :refer [evaluate]]
-            #?(:cljs ["node:vm" :as vm])))
+            #?(:cljs ["node:vm" :as vm])
+            #?(:cljs ["node:child_process" :as child])
+            #?(:cljs ["node:path" :as path])))
 
 #?(:cljs
    (deftest branding-and-typeof-preserve-raw-host-semantics
@@ -70,3 +72,27 @@
      (doseq [f [#(operations/type-of nil) #(operations/array? nil)
                 #(operations/bool-value true) #(operations/bool-value 0)]]
        (is (= :js-value-host (try (f) nil (catch Exception e (:trap (ex-data e)))))))))
+
+#?(:cljs
+   (deftest array-observation-normalizes-overrides-without-return-hooks
+     ;; Mutate the ambient Array in a separate JS process, preserving the
+     ;; interpreter/test runner's own collection machinery. Exercise the
+     ;; static host primitive used directly by operations/array?.
+     (let [probe "const host=await import(process.argv[1]);
+const saved=Array.isArray;const input={};let calls=0,reads=0;const value={};
+Object.defineProperty(value,'valueOf',{get(){reads++;throw Error('coercion');}});
+Object.defineProperty(value,Symbol.toPrimitive,{get(){reads++;throw Error('coercion');}});
+const cases=[false,true,0,-0,NaN,0n,'',null,undefined,42,'x',value];
+try{for(const result of cases){Array.isArray=v=>{calls++;if(v!==input)throw Error('identity');return result;};if(host.arrayBrand(input)!==!!result)throw Error('boolean observation');}
+const error=Error('host error');Array.isArray=()=>{calls++;throw error;};let caught;try{host.arrayBrand(input)}catch(e){caught=e}if(caught!==error)throw Error('error identity');
+}finally{Array.isArray=saved;}if(calls!==13||reads!==0)throw Error('evaluation count or return hook');console.log(JSON.stringify({cases:cases.length,calls,reads}));"
+           result (.spawnSync child js/process.execPath
+                              #js ["--input-type=module" "-e" probe
+                                   (.resolve path "src/kotoba/kir/js_host.mjs")]
+                              #js {:encoding "utf8" :timeout 10000})]
+       (is (= 0 (.-status result)) (.-stderr result))
+       (when (= 0 (.-status result))
+         (let [metrics (js->clj (js/JSON.parse (.-stdout result)) :keywordize-keys true)]
+           (is (= 12 (:cases metrics)))
+           (is (= 13 (:calls metrics)))
+           (is (= 0 (:reads metrics))))))))
