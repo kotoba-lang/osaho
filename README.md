@@ -61,6 +61,18 @@ checkable from outside.
 kbb -M:test
 ```
 
+## Consensus gas
+
+`kotoba.kir.gas` holds a versioned gas schedule and `kotoba.kir/execute-metered`
+meters it: `{:gas limit :gas-schedule schedule}` charges one debit per
+evaluated KIR application form (a module function call weighs `:call`, any
+other head its listed weight or `:default`), returns `{:value v :gas-used n}`,
+and traps `:budget/gas` past the limit. Gas runs beside fuel, never instead
+of it, and is unmetered unless named. It is the normative count other
+backends must reproduce (superproject adr-2610092340 D12); fuel is not,
+because its counting differs by backend family on purpose.
+`schedule-v0-draft` weighs every form 1 and prices nothing.
+
 ## Opaque JS host values
 
 `:js-value` is a target-specific opaque leaf for JS interoperability. On the

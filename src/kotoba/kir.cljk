@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations native-export-codec-types budget-traps default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -14,6 +14,7 @@
             [kotoba.kir.iq-codebook :as iq]
             [kotoba.kir.decimal :as decimal]
             [kotoba.kir.xml :as xml]
+            [kotoba.kir.gas :as gas]
             #?@(:cljs [[kotoba.kir.cljs-i64 :as i64]
                        ["./kir/js_host.mjs" :as js-host]])))
 
@@ -1618,13 +1619,23 @@
 ;; had (pairs, kgraph datoms, 4096 each) remain, and exhausting one is now
 ;; also `:budget/cells` (with `:arena`), not `:heap-exhausted` /
 ;; `:kgraph-exhausted`.
-(def budget-traps #{:budget/fuel :budget/cells :budget/bytes :budget/frames})
+(def budget-traps #{:budget/fuel :budget/cells :budget/bytes :budget/frames :budget/gas})
 
 (defn- charge-cells! [heap n op]
   (when-let [cells (:cells-budget heap)]
     (let [remaining (vswap! cells - n)]
       (when (neg? remaining)
         (trap! :budget/cells {:limit (:cells-limit heap) :op op})))))
+
+(defn- charge-gas!
+  "Consensus gas (`kotoba.kir.gas`): one debit per evaluated application
+  form, weighed by the run's schedule. Not metered unless the embedder named
+  `:gas` -- then it runs BESIDE fuel, never instead of it."
+  [heap op function?]
+  (when-let [gas-left (:gas-budget heap)]
+    (let [remaining (vswap! gas-left - (gas/form-weight (:gas-schedule heap) op function?))]
+      (when (neg? remaining)
+        (trap! :budget/gas {:limit (:gas-limit heap) :op op})))))
 
 (defn- charge-bytes! [heap text op]
   (when-let [bytes (:bytes-budget heap)]
@@ -4027,6 +4038,7 @@
                      (trap! :unbound-symbol {:symbol form}))
     :else
     (let [[op & args] form]
+      (charge-gas! heap op (contains? functions op))
       ;; A constructor is charged twice over: one unit of the run's FUEL,
       ;; always, and one cell when the embedder metered cells. The fuel debit
       ;; is amu ADR 0353 point 7 (floor :allocation-budget): allocation comes
@@ -5863,7 +5875,8 @@
   oracle whose writes are invisible is worth nothing."
   ([kir function-name args] (execute kir function-name args {}))
   ([kir function-name args {:keys [fuel cap-call typed-cap-call pair-capacity kgraph-capacity
-                                   memory frames boundary-budget cells bytes]
+                                   memory frames boundary-budget cells bytes
+                                   gas gas-schedule gas-meter]
                             :or {fuel default-fuel pair-capacity default-pair-capacity
                                  kgraph-capacity default-kgraph-capacity
                                  frames default-frames}}]
@@ -5898,6 +5911,14 @@
        (throw (ex-info (str (name k) " must be a positive integer within the admitted ceiling")
                        {:phase :ir :reason (keyword (str (name k) "-outside-admitted-range"))
                         k v :maximum max-fuel}))))
+   ;; Gas (kotoba.kir.gas) is opt-in and needs its schedule: a budget with
+   ;; no price table, or a price table with no budget, is refused rather than
+   ;; defaulted -- a defaulted schedule is a different chain's receipt.
+   (when (or gas gas-schedule)
+     (when-not (and (integer? gas) (pos? gas) (<= gas max-fuel))
+       (throw (ex-info "gas must be a positive integer within the admitted ceiling"
+                       {:phase :ir :reason :gas-outside-admitted-range :gas gas :maximum max-fuel})))
+     (gas/validate-schedule! gas-schedule))
    (when-not (and (integer? pair-capacity) (<= 0 pair-capacity default-pair-capacity))
      (throw (ex-info "pair capacity is outside runtime limits"
                      {:phase :ir :pair-capacity pair-capacity})))
@@ -5991,6 +6012,11 @@
                                                       :cells-limit cells
                                                       :bytes-budget (when bytes (volatile! bytes))
                                                       :bytes-limit bytes
+                                                      :gas-budget (when gas
+                                                                    (doto (or gas-meter (volatile! nil))
+                                                                      (vreset! gas)))
+                                                      :gas-limit gas
+                                                      :gas-schedule gas-schedule
                                                       :memory memory-image}
                                     [] cap-dispatch))
            ;; Box a `:bool` result at the boundary, the way every other target
@@ -6282,3 +6308,15 @@
                                                           value)]
                                             [:return]]}]
                      [])))))
+
+(defn execute-metered
+  "`execute` with consensus gas (`kotoba.kir.gas`) metered: returns
+  `{:value v :gas-used n}`. `opts` must name `:gas` (the limit) and
+  `:gas-schedule`; every other option is `execute`'s. A run that exhausts its
+  gas throws the `:budget/gas` trap like any other budget -- the consensus
+  caller's rule for it (revert, charge the whole limit) is not this
+  interpreter's to apply."
+  [kir function-name args {:keys [gas] :as opts}]
+  (let [meter (volatile! nil)
+        value (execute kir function-name args (assoc opts :gas-meter meter))]
+    {:value value :gas-used (- gas @meter)}))
