@@ -1625,8 +1625,11 @@
       (if (> (vector-count xs) (doc-limit)) (r-trap fuel "document-vector-too-large")
         (r-val (doc-v (if (= op 206) "vector" "list") xs) fuel))
       (= op 208)
-      (if (> (quot (vector-count xs) 2) (doc-limit)) (r-trap fuel "document-map-too-large")
-        (r-val (doc-v "map" (build-map xs)) fuel))
+      (cond
+        (> (quot (vector-count xs) 2) (doc-limit)) (r-trap fuel "document-map-too-large")
+        ;; the host's `bounded-document!` refuses a map whose keys repeat
+        (< (quot (vector-count (build-map xs)) 2) (quot (vector-count xs) 2)) (r-trap fuel "document-map-duplicate-key")
+        :else (r-val (doc-v "map" (build-map xs)) fuel))
       (= op 209) (doc-count (arg-v xs 0) fuel)
       (= op 210) (r-val (kv/keyword-value (doc-kind-name (arg-v xs 0))) fuel)
       (= op 218) (r-val (kv/bool-value (kv/value-eq (arg-v xs 0) (arg-v xs 1))) fuel)
@@ -2052,11 +2055,74 @@
       ar
       (ev-float op (kv/kids-of (o-value ar)) (o-st ar)))))
 
+;; A map key as the host takes it: a keyword, or a document (a keyword node is
+;; the same key). 0 the key is a keyword (KV), 1 a keyword node, 2 another
+;; document (its order is `document-map-key-compare`, not ported: refused),
+;; 3 not a document (the host's `bounded-document!` throws).
+(defn- key-kind [v [:ref :kir/v]] :i64
+  (cond
+    (= 5 (kv/tag-of v)) 0
+    (and (doc? v) (doc-tag? v "keyword")) 1
+    (doc? v) 2
+    :else 3))
+
+(defn- as-key [v [:ref :kir/v]] [:ref :kir/v] (if (= 1 (key-kind v)) (kv/nth-of v 0) v))
+
+;; "" when every key of a document-map operand list is a keyword or a keyword node
+(defn- map-keys-trap [xs [:list [:ref :kir/v]]] :string
+  (loop [j 0]
+    (if (>= j (vector-count xs)) ""
+      (let [k (key-kind (arg-v xs j))]
+        (cond (= k 2) "interpreter-limit"
+              (= k 3) "value-type-mismatch"
+              :else (recur (+ j 2)))))))
+
+(defn- keys-normalised [xs [:list [:ref :kir/v]]] [:list [:ref :kir/v]]
+  (loop [j 0 acc (kv/no-values)]
+    (if (>= j (vector-count xs)) acc
+      (recur (inc j) (kv/append-value acc (if (= 0 (rem j 2)) (as-key (arg-v xs j)) (arg-v xs j)))))))
+
+;; document-contains / -get / -assoc / -dissoc in the host's order: the document,
+;; the map check, then the key, then (assoc) the item.
+(defn- ev-document-keyed [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel [:ref :kir.interp/st]] [:ref :kir.interp/out]
+  (if (not (= (form/count-of form) (+ 1 (doc-arity op))))
+    (r-trap fuel "arity-mismatch")
+    (let [dr (ev-operand (form/nth-of form 1) env cx fuel)]
+      (cond
+        (not (= 0 (o-kind dr))) dr
+        (not (doc? (o-value dr))) (mismatch (o-st dr))
+        (not (doc-tag? (o-value dr) "map")) (r-trap (o-st dr) "document-map-required")
+        :else
+        (let [kr (ev-operand (form/nth-of form 2) env cx (o-st dr))]
+          (cond
+            (not (= 0 (o-kind kr))) kr
+            (= 2 (key-kind (o-value kr))) (r-trap (o-st kr) "interpreter-limit")
+            (= 3 (key-kind (o-value kr))) (mismatch (o-st kr))
+            (not (= op 221))
+            (ev-document op (kv/two-values (o-value dr) (as-key (o-value kr))) (o-st kr))
+            :else
+            (let [ir (ev-operand (form/nth-of form 3) env cx (o-st kr))]
+              (if (not (= 0 (o-kind ir)))
+                ir
+                (ev-document op (kv/append-value (kv/two-values (o-value dr) (as-key (o-value kr))) (o-value ir))
+                             (o-st ir))))))))))
+
 (defn- ev-document-call [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel [:ref :kir.interp/st]] [:ref :kir.interp/out]
-  (let [ar (ev-args form env cx fuel)]
-    (if (not (= 0 (o-kind ar)))
-      ar
-      (ev-document op (kv/kids-of (o-value ar)) (o-st ar)))))
+  (if (doc-key-op? op)
+    (if (= op 208)
+      (let [ar (ev-args form env cx fuel)]
+        (if (not (= 0 (o-kind ar)))
+          ar
+          (let [xs (kv/kids-of (o-value ar))
+                t (if (= 0 (rem (vector-count xs) 2)) (map-keys-trap xs) "")]
+            (if (string=? t "")
+              (ev-document op (if (= 0 (rem (vector-count xs) 2)) (keys-normalised xs) xs) (o-st ar))
+              (r-trap (o-st ar) t)))))
+      (ev-document-keyed op form env cx fuel))
+    (let [ar (ev-args form env cx fuel)]
+      (if (not (= 0 (o-kind ar)))
+        ar
+        (ev-document op (kv/kids-of (o-value ar)) (o-st ar))))))
 
 (defn- ev-list [form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel [:ref :kir.interp/st]] [:ref :kir.interp/out]
   (let [head (form/first-of form)]
@@ -2160,15 +2226,6 @@
 (defn- doc-key-op? [op :i64] :bool
   (or (= op 208) (or (= op 219) (or (= op 220) (or (= op 221) (= op 222))))))
 
-;; A map key must be a keyword literal in the source (a computed key could be any document, and
-;; non-keyword keys are not ported).
-(defn- doc-keys-literal? [op :i64 form [:ref :form/r]] :bool
-  (if (= op 208)
-    (loop [i 1]
-      (if (>= i (form/count-of form)) true
-        (if (= 4 (form/tag-of (form/nth-of form i))) (recur (+ i 2)) false)))
-    (and (> (form/count-of form) 2) (= 4 (form/tag-of (form/nth-of form 2))))))
-
 ;; An f64 literal is ported only when it has a fractional part. The host on nbb
 ;; reads an integral float literal (2.0, 1e20, -0.0) as an INTEGER (its
 ;; `integer?` admits it before `f64-value?` is asked), which this route cannot
@@ -2196,8 +2253,6 @@
                  (desc-shape-ok? (op-code name) (form/nth-of form 1))
                  (all-expr-ok? form 2 fns))
             (>= (op-code name) 310) (typed-form-ok? (op-code name) form fns)
-            (and (ported-op? name) (doc-key-op? (op-code name)))
-            (and (doc-keys-literal? (op-code name) form) (all-expr-ok? form 1 fns))
             (ported-op? name) (all-expr-ok? form 1 fns)
             :else (and (fn-name-in? fns name) (all-expr-ok? form 1 fns))))
         false)
