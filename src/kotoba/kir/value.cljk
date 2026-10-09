@@ -1,5 +1,5 @@
 (ns kotoba.kir.value
-  {:kotoba/export [utf8-invalid-traps utf8-invalid-at utf8-decode-canonical bytes-item-out-of-range-at bytes-from-items bytes-items bytes-slice-of utf8-find-byte! utf8-append-range! utf8-index-of-from! utf8-compare-lines! utf8-compare! fold-ascii! utf8-find-blank! utf8-skip-blank! adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! shallow-typed-value! operand-tag? boundary-traversal-node-limit boundary-traversal-byte-limit bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit]}
+  {:kotoba/export [cidv1-binary-items? document-link-byte-limit utf8-invalid-traps utf8-invalid-at utf8-decode-canonical bytes-item-out-of-range-at bytes-from-items bytes-items bytes-slice-of utf8-find-byte! utf8-append-range! utf8-index-of-from! utf8-compare-lines! utf8-compare! fold-ascii! utf8-find-blank! utf8-skip-blank! adt-depth-limit adt-node-limit bounded-bytes! bounded-disjoint-set-i64! bounded-document! bounded-keyword! bounded-map! bounded-option-i64! bounded-result-i64! bounded-string! bounded-string-index! bounded-symbol! bounded-typed-value! shallow-typed-value! operand-tag? boundary-traversal-node-limit boundary-traversal-byte-limit bounded-vector-f64! bounded-vector-i64! bytes-byte-count bytes-value-byte-limit bytes-value? canonical-indirect-byte-limit canonical-list-item-limit canonical-list-total-item-limit canonical-tuple-item-limit compact-graph-item-limit compare-typed-values concat-bytes document-canonical-bytes document-compare document-container-item-limit document-depth-limit document-edn-print document-edn-read document-map-key-compare document-node-limit document-print document-read document-sha256-hex document-utf8-byte-limit empty-bytes f32-to-f64-exact f32-to-i64-bits f32-to-i64-checked f32-to-i64-truncating f32-value? f64-to-f32-rounded f64-to-i64-bits f64-to-i64-checked f64-to-i64-truncating f64-value? fold-case! heterogeneous-vector-item-limit i64-bits-to-f32 i64-bits-to-f64 i64-to-f32-checked i64-to-f32-rounded i64-to-f64-checked i64-to-f64-rounded keyword-value-byte-limit make-bytes-stream make-bytes-stream-from-chunks make-chunk-queue-bytes-stream make-open-chunk-queue-bytes-stream make-pending-bytes-task make-ready-bytes-task make-ready-bytes-task-from-chunk-queue make-ready-open-chunk-queue-task map-entry-limit record-field-limit resource-table-reset! stream-cancel! stream-close! stream-drop! stream-enqueue! stream-live? stream-read! stream-value? string-index-key-byte-limit string-literal-byte-limit string-value-byte-limit symbol-value-byte-limit task-cancel! task-drop! task-fulfill! task-fulfill-chunk-queue! task-fulfill-open-chunk-queue! task-live? task-poll task-value? typed-map-entry-limit typed-set-item-limit upper-case! utf8-byte-count! utf8-code-point-at! utf8-index-of! utf8-string->bytes utf8-substring! validate-value-type! variant-case-limit vector-item-limit vector-literal-item-limit]}
   (:require [kotoba.lang.text :as str]
             #?@(:cljs [[sha2.core :as sha2]
                        [kotoba.kir.cljs-i64 :as i64]]))
@@ -1453,6 +1453,93 @@
 
 (declare document-canonical-bytes document-compare document-map-key-compare)
 
+;; :bytes and :link document kinds (root ADR-2610092310 S1). Inside the tagged
+;; tree both payloads are a vector of byte ints 0..255, not a host byte array:
+;; structural `=` (document-equal?), sorting and canonical bytes then work the
+;; same on the JVM and on ClojureScript. The host :bytes value appears only at
+;; the operations that cross into or out of a document.
+(def document-link-byte-limit
+  "Largest binary CIDv1 a :link document holds. Not derived: sha2-256 and
+  blake3-256 CIDv1s are 36-40 bytes, so 128 leaves room for longer digests."
+  128)
+
+(defn- byte-items!
+  "ITEMS as a vector of host integers 0..255, or a :value error."
+  [items what]
+  (when-not (vector? items)
+    (throw (ex-info (str "invalid document " what) {:phase :value})))
+  (mapv (fn [item]
+          (when-not (and #?(:clj (integer? item)
+                            :cljs (and (number? item) (js/Number.isInteger item)))
+                         (<= 0 item 255))
+            (throw (ex-info (str "invalid document " what " byte") {:phase :value})))
+          #?(:clj (long item) :cljs item))
+        items))
+
+(defn- uvarint-at
+  "[value next-index] of the minimal unsigned LEB128 varint at I in ITEMS, or
+  nil when it is truncated, longer than 9 bytes, or not minimal."
+  [items i]
+  ;; at most 9 bytes = 63 bits, so every value here is a safe host integer on
+  ;; the JVM; on ClojureScript a varint past 2^53 loses low bits, which only a
+  ;; digest length could need and none is that large.
+  (loop [j i mult 1 acc 0]
+    (when (and (< j (count items)) (< (- j i) 9))
+      (let [b (nth items j)
+            acc (+ acc (* (bit-and b 127) mult))]
+        (if (< b 128)
+          (when-not (and (= b 0) (> j i)) [acc (inc j)])
+          (recur (inc j) (* mult 128) acc))))))
+
+(defn cidv1-binary-items?
+  "True when ITEMS (byte ints) is one binary CIDv1: varint version 1, varint
+  codec, varint multihash code, varint digest length, then exactly that many
+  digest bytes, and at most document-link-byte-limit bytes in all."
+  [items]
+  (boolean
+   (and (<= (count items) document-link-byte-limit)
+        (when-let [[version i] (uvarint-at items 0)]
+          (and (= 1 version)
+               (when-let [[_codec i] (uvarint-at items i)]
+                 (when-let [[_code i] (uvarint-at items i)]
+                   (when-let [[length i] (uvarint-at items i)]
+                     (= (+ i length) (count items))))))))))
+
+(def ^:private base32-alphabet "abcdefghijklmnopqrstuvwxyz234567")
+
+(defn- base32-lower
+  "RFC 4648 base32, lowercase, unpadded, of byte ints ITEMS."
+  [items]
+  (loop [items (seq items) buffer 0 bits 0 out []]
+    (cond
+      (>= bits 5) (let [shift (- bits 5)]
+                    (recur items (bit-and buffer (dec (bit-shift-left 1 shift))) shift
+                           (conj out (nth base32-alphabet (bit-shift-right buffer shift)))))
+      items (recur (next items) (bit-or (bit-shift-left buffer 8) (first items)) (+ bits 8) out)
+      (pos? bits) (apply str (conj out (nth base32-alphabet (bit-shift-left buffer (- 5 bits)))))
+      :else (apply str out))))
+
+(defn- base32-lower-decode
+  "Byte ints of lowercase unpadded base32 TEXT, or nil when TEXT has a
+  character outside the alphabet or nonzero trailing bits."
+  [text]
+  (loop [i 0 buffer 0 bits 0 out []]
+    (if (= i (count text))
+      (when (and (< bits 5) (zero? buffer)) out)
+      (let [v (.indexOf base32-alphabet (str (nth text i)))]
+        (when-not (neg? v)
+          (let [buffer (bit-or (bit-shift-left buffer 5) v) bits (+ bits 5)]
+            (if (>= bits 8)
+              (let [shift (- bits 8)]
+                (recur (inc i) (bit-and buffer (dec (bit-shift-left 1 shift))) shift
+                       (conj out (bit-shift-right buffer shift))))
+              (recur (inc i) buffer bits out))))))))
+
+(defn- byte-items-hex [items]
+  (apply str (map (fn [b] (let [h #?(:clj (Integer/toHexString (int b)) :cljs (.toString b 16))]
+                            (if (< (count h) 2) (str "0" h) h)))
+                  items)))
+
 (defn bounded-document!
   "Validate and rebuild the canonical tagged document tree. Document maps use
   keyword keys sorted by their full textual representation; document values
@@ -1518,6 +1605,26 @@
                                       (charge-text! (str payload)) payload)]
                   "symbol" [tag (do (bounded-symbol! payload symbol-value-byte-limit)
                                      (charge-text! (str payload)) payload)]
+                  ;; bytes share the aggregate payload budget with text: a
+                  ;; document stays one bounded value, and a large blob belongs
+                  ;; in its own block behind a :link.
+                  "bytes" (let [items (byte-items! payload "bytes")]
+                            (when (> (count items) bytes-value-byte-limit)
+                              (throw (ex-info "document bytes exceed byte limit"
+                                              {:phase :value :limit bytes-value-byte-limit})))
+                            (vswap! bytes + (count items))
+                            (when (> @bytes document-utf8-byte-limit)
+                              (throw (ex-info "document exceeds aggregate UTF-8 limit"
+                                              {:phase :value :limit document-utf8-byte-limit})))
+                            [tag items])
+                  "link" (let [items (byte-items! payload "link")]
+                           (when-not (cidv1-binary-items? items)
+                             (throw (ex-info "document link is not a binary CIDv1" {:phase :value})))
+                           (vswap! bytes + (count items))
+                           (when (> @bytes document-utf8-byte-limit)
+                             (throw (ex-info "document exceeds aggregate UTF-8 limit"
+                                             {:phase :value :limit document-utf8-byte-limit})))
+                           [tag items])
                   ("vector" "list")
                   (do (when-not (and (vector? payload)
                                      (<= (count payload) document-container-item-limit))
@@ -1577,7 +1684,7 @@
   "Deterministic UTF-8 identity encoding of a validated document. Format:
   n | b t/f | i <decimal> ; | f <i64-bits-decimal> ; |
   s <utf8-len> : <bytes> | k <utf8-len> : <keyword-str-with-colon-bytes> |
-  y <utf8-len> : <symbol-bytes> |
+  y <utf8-len> : <symbol-bytes> | x <len> : <bytes> | c <len> : <binary-cidv1> |
   v <count> : <items...> | l <count> : <items...> | e <count> : <items...> |
   m <count> : ((K <keyword-len> : <keyword-bytes> | D <document-key>) <item>)*
 
@@ -1619,6 +1726,11 @@
                                 (emit-len-str (str (second node))))
                   "symbol" (do (emit (ascii \y))
                                (emit-len-str (str (second node))))
+                  ("bytes" "link") (let [items (second node)]
+                                     (emit (ascii (if (= tag "bytes") \x \c)))
+                                     (emit-str (str (count items)))
+                                     (emit (ascii \:))
+                                     (doseq [b items] (emit b)))
                   "vector" (do (emit (ascii \v))
                                (emit-str (str (count (second node))))
                                (emit (ascii \:))
@@ -1830,6 +1942,12 @@
                                           {:phase :value :text kw-str})))
                         ["keyword" (keyword (subs kw-str 1))])
                   121 ["symbol" (symbol (take-len-str))]
+                  (120 99) (let [n (take-count)]
+                             (when (or (neg? n) (> n bytes-value-byte-limit) (> (+ @idx n) len))
+                               (throw (ex-info "document-read bytes length out of range"
+                                               {:phase :value :length n})))
+                             (let [items (mapv (fn [_] (take-byte)) (range n))]
+                               [(if (= tag 120) "bytes" "link") items]))
                   118 (let [n (take-count)]
                         (when (or (neg? n) (> n document-container-item-limit))
                           (throw (ex-info "document-read vector count out of range"
@@ -1951,6 +2069,8 @@
                 "string" (document-edn-escape-string payload)
                 "keyword" (str payload)
                 "symbol" (document-edn-symbol-text payload)
+                "bytes" (str "#kotoba/bytes \"" (byte-items-hex payload) "\"")
+                "link" (str "#kotoba/cid \"b" (base32-lower payload) "\"")
                 "vector" (str "[" (str/join " " (map walk payload)) "]")
                 "list" (str "(" (str/join " " (map walk payload)) ")")
                 "set" (str "#{" (str/join " " (map walk payload)) "}")
@@ -2016,6 +2136,19 @@
                                   (fail "unsupported string escape")))
                         (recur))
                       :else (do (vswap! parts conj (str ch)) (recur)))))))
+            (tagged-literal [tag text]
+              (if (= tag "kotoba/bytes")
+                (do (when-not (and (even? (count text)) (re-matches #"[0-9a-f]*" text))
+                      (fail "bytes literal must be lowercase hex"))
+                    ["bytes" (mapv (fn [k] #?(:clj (Integer/parseInt (subs text k (+ k 2)) 16)
+                                              :cljs (js/parseInt (subs text k (+ k 2)) 16)))
+                                   (range 0 (count text) 2))])
+                (let [items (when (str/starts-with? text "b")
+                              (base32-lower-decode (subs text 1)))]
+                  (when-not (and items (cidv1-binary-items? items)
+                                 (= text (str "b" (base32-lower items))))
+                    (fail "cid literal must be a canonical base32 binary CIDv1"))
+                  ["link" items])))
             (read-token []
               (let [start @cursor]
                 (loop []
@@ -2091,21 +2224,31 @@
                                   (recur (conj entries [key-node
                                                         (read-value (inc depth))])))))))
                 \# (do (take-char)
-                        (when-not (= (at) \{) (fail "dispatch forms are forbidden"))
-                        (take-char)
-                        (loop [items []]
-                          (skip)
-                          (if (= (at) \})
-                            (do (take-char)
-                                (let [canonical (vec (sort document-compare items))]
-                                  (when-not (every? (fn [[left right]]
-                                                      (neg? (document-compare left right)))
-                                                    (partition 2 1 canonical))
-                                    (fail "duplicate set item"))
-                                  ["set" canonical]))
-                            (do (when (>= (count items) document-container-item-limit)
-                                  (fail "set item limit exceeded"))
-                                (recur (conj items (read-value (inc depth))))))))
+                        (if-not (= (at) \{)
+                          ;; the two admitted tagged literals (root
+                          ;; ADR-2610092310), canonical text only, so the text
+                          ;; stays the identity native treats it as
+                          (let [tag (read-token)]
+                            (when-not (contains? #{"kotoba/bytes" "kotoba/cid"} tag)
+                              (fail "dispatch forms are forbidden"))
+                            (when-not (= (at) \space) (fail "tagged literal needs one space"))
+                            (take-char)
+                            (when-not (= (at) \") (fail "tagged literal needs a string"))
+                            (tagged-literal tag (read-quoted)))
+                          (do (take-char)
+                              (loop [items []]
+                                (skip)
+                                (if (= (at) \})
+                                  (do (take-char)
+                                      (let [canonical (vec (sort document-compare items))]
+                                        (when-not (every? (fn [[left right]]
+                                                            (neg? (document-compare left right)))
+                                                          (partition 2 1 canonical))
+                                          (fail "duplicate set item"))
+                                        ["set" canonical]))
+                                  (do (when (>= (count items) document-container-item-limit)
+                                        (fail "set item limit exceeded"))
+                                      (recur (conj items (read-value (inc depth))))))))))
                 \) (fail "unexpected closing delimiter")
                 \] (fail "unexpected closing delimiter")
                 \} (fail "unexpected closing delimiter")
