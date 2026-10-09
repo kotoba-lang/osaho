@@ -222,13 +222,15 @@
                       document-equal? document-set-contains? document-sha256 document-print document-read
                       document-edn-print document-edn-read document-contains document-get document-assoc
                       document-dissoc document-merge document-string-value document-keyword-value document-symbol-value
-                      document-bool-value document-i64-value document-f64-value}
+                      document-bool-value document-i64-value document-f64-value
+                      document-bytes document-bytes-value document-link document-link-value}
                     (first value)))
     (reduce (fn [result item] (walk item result))
             (cond-> (conj found :document)
               (= 'document-kind (first value)) (conj :keyword)
               (= 'document-sha256 (first value)) (conj :string)
-              (contains? '#{document-print document-edn-print} (first value)) (conj :string))
+              (contains? '#{document-print document-edn-print} (first value)) (conj :string)
+              (contains? '#{document-bytes-value document-link-value} (first value)) (conj :bytes))
             value)
     (and (seq? value) (= 'keyword-from-string (first value)))
     (reduce (fn [result item] (walk item result)) (conj found :keyword) value)

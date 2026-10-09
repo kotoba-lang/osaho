@@ -193,6 +193,7 @@
      document-assoc document-dissoc document-merge document-string-value document-keyword-value document-symbol-value
      document-bool-value document-i64-value document-f64-value document-sha256 document-print document-read
      document-edn-print document-edn-read
+     document-bytes document-bytes-value document-link document-link-value
      i32-wrap u32-wrap i32-wrapping-add i32-wrapping-mul i32-xor
      i32-shift-left i32-shift-right u32-shift-right xorshift32
      bit-or bit-not i64-shift-left i64-shift-right u64-shift-right min max
@@ -5323,6 +5324,29 @@
                (value/bounded-disjoint-set-i64! [new-parents new-ranks])])))
 
         (= op 'document-null) ["null"]
+
+        ;; :bytes and :link documents (root ADR-2610092310 S1). document-link
+        ;; answers an option: bytes that are not one binary CIDv1 make no
+        ;; link, and a malformed link is neither built silently nor a trap.
+        (= op 'document-bytes)
+        (let [b (value/bounded-bytes!
+                 (eval-expr (first args) env functions fuel heap call-stack cap-call))]
+          (value/bounded-document! ["bytes" (value/bytes-items b)]))
+
+        (= op 'document-link)
+        (let [items (value/bytes-items
+                     (value/bounded-bytes!
+                      (eval-expr (first args) env functions fuel heap call-stack cap-call)))]
+          (if (value/cidv1-binary-items? items)
+            [[:option :document] true (value/bounded-document! ["link" items])]
+            [[:option :document] false]))
+
+        (contains? '#{document-bytes-value document-link-value} op)
+        (let [[tag payload] (value/bounded-document!
+                             (eval-expr (first args) env functions fuel heap call-stack cap-call))]
+          (if (= tag (if (= op 'document-bytes-value) "bytes" "link"))
+            [[:option :bytes] true (value/bytes-from-items payload)]
+            [[:option :bytes] false]))
 
         (contains? '#{document-bool document-i64 document-f64
                       document-string document-keyword document-symbol} op)
