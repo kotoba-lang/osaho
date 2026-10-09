@@ -55,6 +55,7 @@
       (let [tr (kir/run-trap r)]
         (cond
           (string=? tr \"kotoba.kir/oracle-unavailable\") \"N\"
+          (string=? tr \"kotoba.kir/oracle-trap:interpreter-limit\") \"N\"
           (form/is-string? expected)
           (if (string=? (string-concat \"T:\" (kir/run-message r)) (form/string-value expected)) \"=\" \"!\")
           :else \"!\")))))
@@ -198,7 +199,9 @@
         ok? (fn [c] (case (:kind c)
                       :lower (= (:got c) "=")
                       (= (:got c) (:exp c))))
-        not-ported? (fn [c] (= "N" (:got c)))]
+        ;; N: not ported; T:interpreter-limit: refused at run time (a value the
+        ;; interpreter does not represent, e.g. a non-keyword document map key)
+        not-ported? (fn [c] (contains? #{"N" "T:interpreter-limit"} (:got c)))]
     (doseq [k [:lower :execute :eval]]
       (let [rs (filter #(= k (:kind %)) results)
             np (filter not-ported? rs)

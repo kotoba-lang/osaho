@@ -84,7 +84,7 @@
      bytes-empty bytes-count bytes-at bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes
      f64-from-bits f64-to-bits f64-add f64-sub f64-mul f64-div f64-min f64-max f64-neg f64-abs f64-sqrt f64-eq f64-lt f64-le f64-gt f64-ge f64-unordered f32-from-bits f32-to-bits f32-add f32-sub f32-mul f32-div f32-min f32-max f32-neg f32-abs f32-sqrt f32-eq f32-lt f32-le f32-gt f32-ge f32-unordered i64-to-f64-checked i64-to-f64-rounded f64-to-i64-checked f64-to-i64-truncating f64-to-f32-rounded f32-to-f64-exact i64-to-f32-checked i64-to-f32-rounded f32-to-i64-checked f32-to-i64-truncating
      document-null document-bool document-i64 document-f64 document-string document-keyword document-vector document-list document-map document-count document-kind document-vector-at document-list-at document-vector-assoc document-vector-conj document-vector-drop document-vector-remove document-map-entry-at document-equal? document-contains document-get document-assoc document-dissoc document-merge document-string-value document-keyword-value document-bool-value document-i64-value document-f64-value
-     pair pair-first pair-second record-new record-get variant-new variant-match hetero-vector-new hetero-vector-at
+     pair pair-first pair-second record-new record-get variant-new variant-match hetero-vector-new hetero-vector-at hetero-vector-assoc
      typed-set-new typed-set-count vector-f64-new vector-f64-count vector-f64-get vector-f64-at vector-f64-drop
      vector-f64-take vector-f64-assoc vector-f64-conj string-from-utf8 string-compare-lines string-find-byte
      string-append-range string-find-blank string-skip-blank})
@@ -780,7 +780,27 @@
    "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 226 130)))))"
    "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 244 144 128 128)))))"
    "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 248)))))"
-   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 224 128 128)))))"])
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 224 128 128)))))"
+   "(defn main [] :i64 (nth (hetero-vector-assoc [:vector [:i64 :string]] (hetero-vector [:vector [:i64 :string]] 1 \"a\") 0 7) 0))"
+   "(defn main [] :i64 (string-length (nth (hetero-vector-assoc [:vector [:i64 :string]] (hetero-vector [:vector [:i64 :string]] 1 \"a\") 1 \"xyz\") 1)))"
+   "(defn main [] :i64 (nth (hetero-vector-assoc [:vector [:i64 :string]] (hetero-vector [:vector [:i64 :string]] 1 \"a\") 2 5) 0))"
+   "(defn main [] :bool (= (hetero-vector-assoc [:vector [:i64 :string]] (hetero-vector [:vector [:i64 :string]] 1 \"a\") 0 1) (hetero-vector [:vector [:i64 :string]] 1 \"a\")))"
+   "(ns t.tree (:schemas {:t/n [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]]}))
+(defn leaf [n :i64] [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]] (variant-new [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]] :leaf n))
+(defn sum [n [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]]] :i64 (match-variant n [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]] (:leaf x x) (:branch p (+ (sum (hetero-vector-at [:vector [[:ref :t/n] [:ref :t/n]]] p 0)) (sum (hetero-vector-at [:vector [[:ref :t/n] [:ref :t/n]]] p 1))))))
+(defn main [] :i64 (sum (match-variant (variant-new [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]] :branch (hetero-vector [:vector [[:ref :t/n] [:ref :t/n]]] (leaf 1) (leaf 2))) [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]] (:leaf x (leaf x)) (:branch p (variant-new [:variant :t/n [[:leaf :i64] [:branch [:vector [[:ref :t/n] [:ref :t/n]]]]]] :branch (hetero-vector-assoc [:vector [[:ref :t/n] [:ref :t/n]]] p 1 (leaf 9)))))))"
+   "(defn main [] :i64 (document-count (document-map (document-keyword :a) (document-i64 1) :b (document-i64 2))))"
+   "(defn main [] :i64 (document-count (document-map :a (document-i64 1) (document-keyword :a) (document-i64 2))))"
+   "(defn main [] :i64 (option-value-of [:option :i64] (document-i64-value (option-value-of [:option :document] (document-get (document-map :a (document-i64 5)) (document-keyword :a)) (document-null))) -1))"
+   "(defn main [] :bool (document-contains (document-map :a (document-i64 5)) (document-keyword :b)))"
+   "(defn main [] :i64 (document-count (document-assoc (document-map :a (document-i64 5)) (document-keyword :b) (document-i64 6))))"
+   "(defn main [] :i64 (document-count (document-dissoc (document-map :a (document-i64 5)) (document-keyword :a))))"
+   "(defn main [] :bool (document-contains (document-map :a (document-i64 5)) (document-string \"a\")))"
+   "(defn main [] :i64 (document-count (document-map (document-string \"k\") (document-i64 1))))"
+   "(defn main [] :bool (document-contains (document-i64 1) (if (= (quot 1 0) 0) (document-keyword :a) (document-keyword :b))))"
+   "(defn main [] :bool (document-contains (document-map :a (document-i64 5)) (if (= (quot 1 0) 0) (document-keyword :a) (document-keyword :b))))"
+   "(defn ex-info2 [msg :string data :document] :document (document-map (document-keyword :message) (document-string msg) (document-keyword :data) data))
+(defn main [] :i64 (string-byte-length (option-value-of [:option :string] (document-string-value (option-value-of [:option :document] (document-get (ex-info2 \"empty input\" (document-map (document-keyword :input) (document-string \"\"))) (document-keyword :message)) (document-null))) \"\")))"])
 
 (defn hirs-of-sources [srcs]
   (keep try-analyze srcs))
