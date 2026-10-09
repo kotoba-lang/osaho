@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -808,6 +808,16 @@
              (signature-schema-reference? (:functions kir))))
     (assoc :schemas (:schemas kir))))
 
+(def native-vector-operations
+  "The vector heads native admits (the i64 and f64 families; one clause in
+  only-native-word-typed-features?). Data rather than an inline literal so
+  kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '#{vector-new vector-alloc vector-count vector-get vector-at
+     vector-drop vector-take vector-assoc vector-assoc! vector-conj
+     vector-f64-new vector-f64-count vector-f64-get
+     vector-f64-at vector-f64-drop vector-f64-take
+     vector-f64-assoc vector-f64-conj})
+
 (def native-document-operation-arities
   "Document operations native admits (gap 2 of the selfhost foundation), with
   their arity: a number, :any (a container of any length), :even (a map's
@@ -1214,12 +1224,7 @@
                   ;; one host call per element; the element-count bound that
                   ;; makes that expansion finite is `vector-item-limit`, and it
                   ;; is enforced where the value is built, not here.
-                  (contains? '#{vector-new vector-alloc vector-count vector-get vector-at
-                                vector-drop vector-take vector-assoc vector-assoc! vector-conj
-                                vector-f64-new vector-f64-count vector-f64-get
-                                vector-f64-at vector-f64-drop vector-f64-take
-                                vector-f64-assoc vector-f64-conj}
-                             op)
+                  (contains? native-vector-operations op)
                   (every? walk args)
                   ;; `:bytes` (2026-09-25, superproject adr-2609242330). On
                   ;; native a bytes value is a vector-arena handle whose items
