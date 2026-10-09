@@ -224,6 +224,7 @@
 ;;   300 pair 301 pair-first 302 pair-second (the pair heap)
 ;;   310 record-new 311 record-get 312 variant-new 313 variant-match
 ;;   314 hetero-vector-new 315 hetero-vector-at 316 typed-set-new 317 typed-set-count
+;;   318 hetero-vector-assoc
 ;;   320-327 vector-f64-{new count get at drop take assoc conj}
 ;;   107 string-from-utf8 (a :bytes operand)
 (defn- pair-op-code [s :string] :i64
@@ -237,6 +238,7 @@
   (cond
     (string=? s "hetero-vector-new") 314
     (string=? s "hetero-vector-at") 315
+    (string=? s "hetero-vector-assoc") 318
     :else 0))
 
 (defn- float-op-code [s :string] :i64
@@ -1833,12 +1835,25 @@
                 (mismatch (o-st fb))
                 fb))))))))
 
+;; hetero-vector-assoc: V carries TYPE, the item at literal index I (the host's
+;; `assoc` at I+1) is replaced, and the rebuilt node is checked again.
+(defn- hetero-assoc [form [:ref :form/r] v [:ref :kir/v] x [:ref :kir/v] fuel [:ref :kir.interp/st]] [:ref :kir.interp/out]
+  (let [ty (form/nth-of form 1)
+        i (form/int-value (form/nth-of form 3))]
+    (cond
+      (not (typed-node-ok? ty v)) (mismatch fuel)
+      (not (< (+ i 1) (kv/count-of v))) (r-trap fuel "hetero-vector-index-out-of-range")
+      (not (operand-ok? (form/nth-of (form/nth-of ty 1) i) x)) (mismatch fuel)
+      :else (r-val (typed-v "hvec" ty (replace-at (typed-items v) i x)) fuel))))
+
 (defn- ev-typed [op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel [:ref :kir.interp/st]] [:ref :kir.interp/out]
   (cond
     (= op 313) (ev-variant-match form env cx fuel)
     (= op 322) (ev-vector-f64-get form env cx fuel)
     :else
     (let [base (cond (or (< op 310) (>= op 320)) 1 (= op 312) 3 :else 2)
+          ;; hetero-vector-assoc evaluates arguments 2 and 4 (3 is the literal index):
+          ;; argument 3 is evaluated too (an integer literal: no fuel, no trap)
           to (cond (= op 312) 4 (or (= op 311) (or (= op 315) (= op 317))) 3 :else (form/count-of form))
           ar (ev-args-range form base to env cx fuel)]
       (if (not (= 0 (o-kind ar)))
@@ -1855,6 +1870,7 @@
             (= op 314) (hetero-new (form/nth-of form 1) xs fu)
             (= op 316) (set-new (form/nth-of form 1) xs fu)
             (= op 312) (mk-variant (form/nth-of form 1) (form/nth-of form 2) (arg-v xs 0) fu)
+            (= op 318) (hetero-assoc form (arg-v xs 0) (arg-v xs 2) fu)
             :else (typed-read op form (arg-v xs 0) fu)))))))
 
 ;; ---- calls ----
@@ -2245,6 +2261,9 @@
       (= op 315) (and (= h :vector) (= n 4) (expr-ok? (form/nth-of form 2) fns)
                       (form/is-int? (form/nth-of form 3)) (>= (form/int-value (form/nth-of form 3)) 0))
       (= op 316) (and (= h :set) (all-expr-ok? form 2 fns))
+      (= op 318) (and (= h :vector) (= n 5) (expr-ok? (form/nth-of form 2) fns)
+                      (form/is-int? (form/nth-of form 3)) (>= (form/int-value (form/nth-of form 3)) 0)
+                      (expr-ok? (form/nth-of form 4) fns))
       (= op 317) (and (= h :set) (= n 3) (expr-ok? (form/nth-of form 2) fns))
       :else false)))
 
