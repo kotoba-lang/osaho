@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-typed-set-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -818,6 +818,15 @@
      vector-f64-at vector-f64-drop vector-f64-take
      vector-f64-assoc vector-f64-conj})
 
+(def native-typed-set-operation-arities
+  "The [:set T] heads native admits, with their arity counting the type
+  argument (typed-set-new: the type then any items). typed-set-new and
+  typed-set-conj keep their own clauses; count and nth share one, which (as
+  before) does not check arity. Not here, so hosted: contains, disj, equal.
+  Data so kotoba-lang's operation registry can read it (root ADR-2610092330
+  R4)."
+  '{typed-set-new :any typed-set-conj 3 typed-set-count 2 typed-set-nth 3})
+
 (def native-typed-map-operation-arities
   "The [:map K V] heads native admits, with their arity counting the type
   argument (typed-map-new: the type then key/value pairs, :even). Not here,
@@ -1260,7 +1269,8 @@
                          (vector? type) (= :set (first type))
                          (native-word-value-type? type)
                          (walk value) (walk item)))
-                  (contains? '#{typed-set-count typed-set-nth} op)
+                  (contains? (disj (set (keys native-typed-set-operation-arities))
+                                   'typed-set-new 'typed-set-conj) op)
                   (let [[type & rest] args]
                     (and (vector? type) (= :set (first type))
                          (native-word-value-type? type)
