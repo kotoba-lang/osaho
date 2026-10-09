@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -818,6 +818,15 @@
      vector-f64-at vector-f64-drop vector-f64-take
      vector-f64-assoc vector-f64-conj})
 
+(def native-typed-map-operation-arities
+  "The [:map K V] heads native admits, with their arity counting the type
+  argument (typed-map-new: the type then key/value pairs, :even). Not here,
+  so hosted: typed-map-entry-at, -keys, -vals, -equal (entry order and map
+  equality are not observable on native). Data rather than an inline literal
+  so kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '{typed-map-new :even typed-map-count 2 typed-map-contains 3 typed-map-get 3
+    typed-map-assoc 4 typed-map-dissoc 3})
+
 (def native-document-operation-arities
   "Document operations native admits (gap 2 of the selfhost foundation), with
   their arity: a number, :any (a container of any length), :even (a map's
@@ -1291,12 +1300,9 @@
                     (and (native-aggregate-of? :map type)
                          (even? (count entries))
                          (every? walk entries)))
-                  (contains? '#{typed-map-count typed-map-contains typed-map-get
-                                typed-map-assoc typed-map-dissoc} op)
+                  (contains? (disj (set (keys native-typed-map-operation-arities)) 'typed-map-new) op)
                   (let [[type & rest] args]
-                    (and (= (count args)
-                            (get '{typed-map-count 2 typed-map-contains 3 typed-map-get 3
-                                   typed-map-assoc 4 typed-map-dissoc 3} op))
+                    (and (= (count args) (get native-typed-map-operation-arities op))
                          (native-aggregate-of? :map type)
                          (every? walk rest)))
 
