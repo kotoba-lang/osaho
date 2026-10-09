@@ -44,7 +44,10 @@
       (str "V:" hi ":" lo))))
 
 (defn host-outcome
-  "V:/B:/T: for a module host `lower` oracles, nil when it does not (or rejects)."
+  "V:/B:/T: for a module host `lower` oracles, nil when it does not (or rejects).
+  X when the oracle run itself throws an error that names no trap (a value check
+  of kotoba.kir.value): `lower` refuses the module, so the Kotoba side must answer
+  a non-resource trap (or N), never a value."
   [hir fuel frames]
   (try
     (let [r (kir/lower hir {:oracle-fuel fuel :oracle-frames frames})]
@@ -52,7 +55,19 @@
             (:oracle-inconclusive r) (str "T:" (subs (str (:oracle-inconclusive r)) 1))
             :else nil))
     (catch :default e
-      (when-let [t (trap-name e)] (str "T:" t)))))
+      (if-let [t (trap-name e)]
+        (str "T:" t)
+        ;; a value check of the run (kotoba.kir.value throws {:phase :value})
+        (when (loop [x e] (cond (nil? x) false (= :value (:phase (ex-data x))) true :else (recur (.-cause x))))
+          "X")))))
+
+(def resource-traps #{"T:budget/fuel" "T:budget/cells" "T:budget/bytes" "T:budget/frames" "T:host/stack-exhausted"})
+
+(defn agree?
+  "The Kotoba outcome GOT answers the host outcome EXP."
+  [exp got]
+  (or (= exp got)
+      (and (= exp "X") (string? got) (str/starts-with? got "T:") (not (resource-traps got)))))
 
 (def ported-ops
   '#{let if do arena-scope bool-not + - * quot bit-xor bit-and bit-or min max = < > <= >=
@@ -68,7 +83,11 @@
      option-some? option-value result-ok result-err result-ok? result-value result-error
      bytes-empty bytes-count bytes-at bytes-slice bytes-concat bytes-from-vector-i64 vector-i64-from-bytes
      f64-from-bits f64-to-bits f64-add f64-sub f64-mul f64-div f64-min f64-max f64-neg f64-abs f64-sqrt f64-eq f64-lt f64-le f64-gt f64-ge f64-unordered f32-from-bits f32-to-bits f32-add f32-sub f32-mul f32-div f32-min f32-max f32-neg f32-abs f32-sqrt f32-eq f32-lt f32-le f32-gt f32-ge f32-unordered i64-to-f64-checked i64-to-f64-rounded f64-to-i64-checked f64-to-i64-truncating f64-to-f32-rounded f32-to-f64-exact i64-to-f32-checked i64-to-f32-rounded f32-to-i64-checked f32-to-i64-truncating
-     document-null document-bool document-i64 document-f64 document-string document-keyword document-vector document-list document-map document-count document-kind document-vector-at document-list-at document-vector-assoc document-vector-conj document-vector-drop document-vector-remove document-map-entry-at document-equal? document-contains document-get document-assoc document-dissoc document-merge document-string-value document-keyword-value document-bool-value document-i64-value document-f64-value})
+     document-null document-bool document-i64 document-f64 document-string document-keyword document-vector document-list document-map document-count document-kind document-vector-at document-list-at document-vector-assoc document-vector-conj document-vector-drop document-vector-remove document-map-entry-at document-equal? document-contains document-get document-assoc document-dissoc document-merge document-string-value document-keyword-value document-bool-value document-i64-value document-f64-value
+     pair pair-first pair-second record-new record-get variant-new variant-match hetero-vector-new hetero-vector-at
+     typed-set-new typed-set-count vector-f64-new vector-f64-count vector-f64-get vector-f64-at vector-f64-drop
+     vector-f64-take vector-f64-assoc vector-f64-conj string-from-utf8 string-compare-lines string-find-byte
+     string-append-range string-find-blank string-skip-blank})
 
 (defn heads [body]
   (->> (tree-seq coll? seq body)
@@ -84,10 +103,11 @@
   "Only what the interpreter reads: the entry and each function's name, parameters,
   types, result, body and refinements (a smaller text to parse on the Kotoba side)."
   [hir]
-  {:entry (:entry hir)
-   :functions (mapv #(select-keys % [:name :params :param-types :result :body :closure-param-indexes
-                                     :i64-pair-chain-param-indexes :closure-result?])
-                    (:functions hir))})
+  (cond-> {:entry (:entry hir)
+           :functions (mapv #(select-keys % [:name :params :param-types :result :body :closure-param-indexes
+                                             :i64-pair-chain-param-indexes :closure-result?])
+                            (:functions hir))}
+    (seq (:schemas hir)) (assoc :schemas (:schemas hir))))
 
 (defn oracle-module? [hir]
   (and (:entry hir) (contains? #{:i64 :bool} (:result hir)) (every? #{:state :abort} (:effects hir))))
@@ -694,10 +714,88 @@
    "(defn main [] :i64 (document-count (document-vector (document-vector (document-null)) (document-list))))"
    "(defn main [] :i64 (document-count (document-i64 (quot 1 0))))"
    "(defn main [] :i64 (document-count 5))"
-   "(defn collatz [n :i64] :i64 (loop [x n steps 0] (if (= x 1) steps (recur (if (= (rem x 2) 0) (quot x 2) (+ (* 3 x) 1)) (+ steps 1)))))\n(defn main [] :i64 (collatz 27))"])
+   "(defn collatz [n :i64] :i64 (loop [x n steps 0] (if (= x 1) steps (recur (if (= (rem x 2) 0) (quot x 2) (+ (* 3 x) 1)) (+ steps 1)))))\n(defn main [] :i64 (collatz 27))"
+   "(defn main [] :i64 (+ (pair-first (pair 20 99)) (pair-second (pair 1 22))))"
+   "(defn main [] :i64 (pair 7 8))"
+   "(defn main [] :i64 (+ (pair 1 2) (pair 3 4)))"
+   "(defn main [] :i64 (pair-first 0))"
+   "(defn main [] :i64 (pair-second 5))"
+   "(defn main [] :i64 (pair-first (+ (pair 1 2) 1)))"
+   "(defn main [] :i64 (loop [i 0 h 0] (if (< i 5000) (recur (+ i 1) (pair i h)) (pair-first h))))"
+   "(defn main [] :i64 (loop [i 0 h 0] (if (< i 4095) (recur (+ i 1) (pair i h)) (pair-first h))))"
+   "(defn sum [l :i64] :i64 (if (= l 0) 0 (+ (pair-first l) (sum (pair-second l)))))
+(defn main [] :i64 (sum (pair 1 (pair 2 (pair 3 0)))))"
+   "(defn main [] :bool (= (pair 1 2) 1))"
+   "(defn mk [n :i64] :i64 (fn [x :i64] :i64 (+ x n)))
+(defn main [] :i64 ((mk 5) 7))"
+   "(defn twice [f :i64 x :i64] :i64 (f (f x)))
+(defn main [] :i64 (twice (fn [x :i64] :i64 (* x 3)) 2))"
+   "(defn mk [a :i64 b :i64 c :i64 d :i64 e :i64 f :i64] :i64 (fn [x :i64] :i64 (+ x a b c d e f)))
+(defn main [] :i64 ((mk 1 2 3 4 5 6) 7))"
+   "(defn main [] :i64 (record-get [:record :t/p [[:x :i64] [:y :i64]]] (record-new [:record :t/p [[:x :i64] [:y :i64]]] 3 4) :y))"
+   "(defn mk [a :i64] [:record :t/p [[:x :i64] [:y :i64]]] (record-new [:record :t/p [[:x :i64] [:y :i64]]] a (* a 2)))
+(defn main [] :i64 (+ (record-get [:record :t/p [[:x :i64] [:y :i64]]] (mk 5) :x) (record-get [:record :t/p [[:x :i64] [:y :i64]]] (mk 5) :y)))"
+   "(defn main [] :i64 (string-length (record-get [:record :t/b [[:ok :bool] [:s :string]]] (record-new [:record :t/b [[:ok :bool] [:s :string]]] true \"abc\") :s)))"
+   "(defn main [] :i64 (string-length (record-get [:record :t/b [[:ok :bool] [:s :string]]] (record-new [:record :t/b [[:ok :bool] [:s :string]]] (< 1 2) \"abc\") :s)))"
+   "(defn main [] :bool (= (record-new [:record :t/p [[:x :i64] [:y :i64]]] 1 2) (record-new [:record :t/p [[:x :i64] [:y :i64]]] 1 2)))"
+   "(defn main [] :bool (= (record-new [:record :t/p [[:x :i64] [:y :i64]]] 1 2) (record-new [:record :t/p [[:x :i64] [:y :i64]]] 1 3)))"
+   "(defrecord Reading [label :string ok :bool value :i64])
+(defn main [] :i64 (let [r (->Reading \"sensor\" true 7)] (+ (string-length (:label r)) (if (:ok r) (:value r) 0))))"
+   "(defn loopy [n :i64] [:record :t/p [[:x :i64] [:y :i64]]] (loop [i 0 r (record-new [:record :t/p [[:x :i64] [:y :i64]]] 0 0)] (if (< i n) (recur (+ i 1) (record-new [:record :t/p [[:x :i64] [:y :i64]]] (+ (record-get [:record :t/p [[:x :i64] [:y :i64]]] r :x) i) i)) r)))
+(defn main [] :i64 (record-get [:record :t/p [[:x :i64] [:y :i64]]] (loopy 100) :x))"
+   "(defn main [] :i64 (match-variant (variant-new [:variant :t/v [[:a :i64] [:b :string]]] :b \"xyz\") [:variant :t/v [[:a :i64] [:b :string]]] (:a n n) (:b s (string-length s))))"
+   "(defn main [] :i64 (match-variant (variant-new [:variant :t/v [[:a :i64] [:b :string]]] :a 41) [:variant :t/v [[:a :i64] [:b :string]]] (:a n (+ n 1)) (:b s (string-length s))))"
+   "(defn main [] :bool (= (variant-new [:variant :t/v [[:a :i64] [:b :string]]] :a 1) (variant-new [:variant :t/v [[:a :i64] [:b :string]]] :a 1)))"
+   "(defn main [] :i64 (string-length (nth (hetero-vector [:vector [:i64 :string :bool]] 7 \"Ada\" true) 1)))"
+   "(defn main [] :i64 (nth (hetero-vector [:vector [:i64 :string]] 7 \"Ada\") 0))"
+   "(def kinds #{:blue :red :green})
+(defn main [] :i64 (typed-set-count [:set :keyword] kinds))"
+   "(def ns #{3 1 2 -5})
+(defn main [] :i64 (typed-set-count [:set :i64] ns))"
+   "(defn main [] :i64 (f64-to-bits (vector-f64-at (vector-f64-drop (vector-f64-conj (vector-f64 1.5 2.5) 3.5) 1) 1)))"
+   "(defn main [] :i64 (vector-f64-count (vector-f64-take (vector-f64 1.5 2.5 3.25) 2)))"
+   "(defn main [] :i64 (f64-to-bits (vector-f64-at (vector-f64 1.5) 3)))"
+   "(defn main [] :i64 (vector-f64-count (vector-f64-drop (vector-f64 1.5) 2)))"
+   "(defn main [] :i64 (f64-to-bits (vector-f64-at (vector-f64-assoc (vector-f64 1.5 2.5) 1 0.25) 1)))"
+   "(defn main [] :i64 (f64-to-bits (vector-f64-get (vector-f64 1.5 2.5) 7 0.75)))"
+   "(defn main [] :i64 (f64-to-bits (vector-f64-get (vector-f64 1.5 2.5) 1 0.75)))"
+   "(defn main [] :i64 (+ (* 100 (+ (string-compare-lines \"ab\\nabc\\n\" 0 \"ab\\nabc\\n\" 3) 2)) (* 10 (+ (string-compare-lines \"a\\tb\\n\" 0 \"a\\n\" 0) 2)) (+ (string-compare-lines \"ab\\n\" 0 \"ab\" 0) 2)))"
+   "(defn main [] :i64 (string-compare-lines \"ab\" 2 \"\" 0))"
+   "(defn main [] :i64 (string-compare-lines \"ab\" 3 \"\" 0))"
+   "(defn main [] :i64 (string-compare-lines \"h\\u00e9\" 2 \"\" 0))"
+   "(defn main [] :i64 (+ (* 100 (string-find-blank \"ab\\tc d\" 3)) (* 10 (string-skip-blank \"  \\n x\" 0)) (+ (string-find-blank \"abc\" 3) 2)))"
+   "(defn main [] :i64 (string-find-blank \"abc\" 4))"
+   "(defn main [] :i64 (string-skip-blank \"   \" 1))"
+   "(defn main [] :i64 (string-skip-blank \"h\\u00e9 x\" 2))"
+   "(defn main [] :i64 (+ (* 100000 (string-find-byte \"a\\nb\\n\" 10 2)) (* 10000 (+ (string-find-byte \"abc\" 99 3) 2)) (* 1000 (string-find-byte \"\\u65e5\\u672c\\u8a9e a\" 32 3))))"
+   "(defn main [] :i64 (string-find-byte \"abc\" 200 0))"
+   "(defn main [] :i64 (string-find-byte \"abc\" 97 7))"
+   "(defn main [] :i64 (let [acc (string-append-range \"x\" \"abc\" 1 3)] (+ (string-byte-length acc) (string-byte-length (string-append-range acc acc 1 3)))))"
+   "(defn main [] :i64 (string-byte-length (string-append-range \"x\" \"abc\" 2 1)))"
+   "(defn main [] :i64 (string-byte-length (string-append-range \"x\" \"h\\u00e9\" 0 2)))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 227 129 130 240 159 152 128)))))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 192 128)))))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 237 160 128)))))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 104 128)))))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 226 130)))))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 244 144 128 128)))))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 248)))))"
+   "(defn main [] :i64 (string-byte-length (string-from-utf8 (bytes-from-vector-i64 (vector-i64 224 128 128)))))"])
 
 (defn hirs-of-sources [srcs]
   (keep try-analyze srcs))
+
+(defn file-hirs
+  "DIFF_FILES=<list file>: one program path per line, relative to DIFF_FILES_ROOT
+  (default the list file's directory) unless absolute."
+  []
+  (if-let [lf (.-DIFF_FILES js/process.env)]
+    (let [root (or (.-DIFF_FILES_ROOT js/process.env) (subs lf 0 (str/last-index-of lf "/")))]
+      (vec (keep (fn [f]
+                   (let [p (if (str/starts-with? f "/") f (str root "/" f))]
+                     (try (sema/analyze (.readFileSync fs p "utf8")) (catch :default _ nil))))
+                 (remove empty? (str/split-lines (.readFileSync fs lf "utf8"))))))
+    []))
 
 
 (defn candidates
@@ -708,8 +806,9 @@
         gen-srcs (vec (repeatedly (js/parseInt (or (.-DIFF_GEN js/process.env) "400")) #(gen-program rnd)))
         gen (vec (hirs-of-sources gen-srcs))
         hand (vec (hirs-of-sources hand-src))
-        _ (println "corpus" (count corpus) "generated" (count gen) "/" (count gen-srcs) "hand" (count hand) "/" (count hand-src))
-        groups [["sema" corpus] ["gen" gen] ["hand" hand]]
+        files (file-hirs)
+        _ (println "corpus" (count corpus) "generated" (count gen) "/" (count gen-srcs) "hand" (count hand) "/" (count hand-src) "files" (count files))
+        groups [["sema" corpus] ["gen" gen] ["hand" hand] ["files" files]]
         budgets (if-let [f (.-DIFF_FUEL js/process.env)] [[(js/parseInt f) 32] [60 5] [50 32]] [[100000 32] [60 5] [50 32]])
         ;; DIFF_BUDGETS=<n>: only the first n budgets; DIFF_FILTER=<text>: only modules whose EDN contains it
         budgets (vec (take (js/parseInt (or (.-DIFF_BUDGETS js/process.env) "3")) budgets))
@@ -718,7 +817,7 @@
                h hs
                :when (oracle-module? h)
                :let [edn (try (->edn (slim h)) (catch :default _ nil))]
-               :when (and edn (< (count edn) 12000) (or (not flt) (some #(str/includes? edn %) (str/split flt #"[|]"))))
+               :when (and edn (< (count edn) (if (= g "files") 200000 12000)) (or (not flt) (some #(str/includes? edn %) (str/split flt #"[|]"))))
                [fuel frames] budgets]
            {:group g :fuel fuel :frames frames :edn edn :hir h}))))
 

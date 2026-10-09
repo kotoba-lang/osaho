@@ -87,7 +87,9 @@
 ")
 
 (defn compile-kotoba []
-  (let [root "/private/tmp/scratch/probe_twin_main.cljk"]
+  (let [dir (or (.-DIFF_SCRATCH js/process.env) "/private/tmp/scratch")
+        _ (.mkdirSync fs dir #js {:recursive true})
+        root (str dir "/probe_twin_main.cljk")]
     (.writeFileSync fs root kotoba-src)
     (let [graph (pf/load-closed-graph root roots)
           linked (project/link-source (:sources graph) (:root graph))
@@ -148,14 +150,14 @@
 (defn main! [dirs]
   (let [mods (modules dirs)
         rnd (make-rng (js/parseInt (or (.-DIFF_SEED js/process.env) "20260930")))
-        groups (mapv (fn [g] [g (mapv :hir (filter #(= g (:group %)) mods))]) ["sema" "gen" "hand"])
+        groups (mapv (fn [g] [g (mapv :hir (filter #(= g (:group %)) mods))]) ["sema" "gen" "hand" "files"])
         lstride (js/parseInt (or (.-DIFF_LSTRIDE js/process.env) "1"))
         lower-cases (vec (for [[g hs] groups
                                [n h] (map-indexed vector hs)
                                :when (or (= g "sema") (zero? (mod n lstride)))
                                :when (oracle-module? h)
                                :let [edn (try (->edn h) (catch :default _ nil))]
-                               :when (and edn (< (count edn) 12000))
+                               :when (and edn (< (count edn) (if (= g "files") 200000 12000)))
                                :let [exp (lower-expected h)]
                                :when exp]
                            {:kind :lower :group g :exp exp :hir h
@@ -167,7 +169,7 @@
                               :when (:entry h)
                               :let [k (slim h)
                                     edn (try (->edn k) (catch :default _ nil))]
-                              :when (and edn (< (count edn) 12000))
+                              :when (and edn (< (count edn) (if (= g "files") 200000 12000)))
                               [fuel frames] [[512 32] [40 4]]
                               :let [exp (exec-outcome k fuel frames)]
                               :when exp]

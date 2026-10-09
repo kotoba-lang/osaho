@@ -22,7 +22,7 @@
             [clojure.string :as str]
             [kotoba.sema :as sema]
             [kotoba.kir :as kir]
-            [kotoba.kir.interp-corpus :as c :refer [->edn host-outcome slim oracle-module? unported-heads candidates]]
+            [kotoba.kir.interp-corpus :as c :refer [->edn host-outcome slim oracle-module? unported-heads candidates agree?]]
             [kotoba.compiler.project :as project]
             [kotoba.compiler.project-files :as pf]))
 
@@ -68,7 +68,9 @@
 ")
 
 (defn compile-kotoba []
-  (let [root "/private/tmp/scratch/probe_ip_diff_main.cljk"]
+  (let [dir (or (.-DIFF_SCRATCH js/process.env) "/private/tmp/scratch")
+        _ (.mkdirSync fs dir #js {:recursive true})
+        root (str dir "/probe_ip_diff_main.cljk")]
     (.writeFileSync fs root kotoba-src)
     (let [graph (pf/load-closed-graph root roots)
           linked (project/link-source (:sources graph) (:root graph))
@@ -146,11 +148,11 @@
                                  (map (fn [c g] (assoc c :got g)) b got)))
                              (partition-all batch-size cases)))
         ported (remove #(= "N" (:got %)) results)
-        bad (remove #(= (:exp %) (:got %)) ported)]
-    (doseq [g ["sema" "gen" "hand"]]
+        bad (remove #(agree? (:exp %) (:got %)) ported)]
+    (doseq [g ["sema" "gen" "hand" "files"]]
       (let [rs (filter #(= g (:group %)) results)
             p (remove #(= "N" (:got %)) rs)]
-        (println (str g ": cases " (count rs) " ported " (count p) " agree " (count (filter #(= (:exp %) (:got %)) p))))))
+        (println (str g ": cases " (count rs) " ported " (count p) " agree " (count (filter #(agree? (:exp %) (:got %)) p))))))
     (println "TOTAL cases" (count results) "ported" (count ported) "agree" (- (count ported) (count bad)) "DISAGREE" (count bad))
     (println "outcomes (ported):" (into (sorted-map) (frequencies (map #(first (str/split (:exp %) #":")) ported))))
     (println "trap kinds (ported):" (into (sorted-map) (frequencies (keep #(when (str/starts-with? (:exp %) "T:") (:exp %)) ported))))
