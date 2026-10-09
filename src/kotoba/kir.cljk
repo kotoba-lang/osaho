@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-typed-set-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-typed-set-operation-arities native-typed-list-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -818,6 +818,13 @@
      vector-f64-at vector-f64-drop vector-f64-take
      vector-f64-assoc vector-f64-conj})
 
+(def native-typed-list-operation-arities
+  "The [:list T] heads native admits, with their arity counting the type
+  argument (typed-list-new: the type then any items). Each keeps its own
+  clause; nth and conj read their arity here. Data so kotoba-lang's operation
+  registry can read it (root ADR-2610092330 R4)."
+  '{typed-list-new :any typed-list-nth 3 typed-list-conj 3})
+
 (def native-typed-set-operation-arities
   "The [:set T] heads native admits, with their arity counting the type
   argument (typed-set-new: the type then any items). typed-set-new and
@@ -1287,14 +1294,14 @@
                          (every? walk items)))
                   (= op 'typed-list-nth)
                   (let [[type value index] args]
-                    (and (= 3 (count args))
+                    (and (= (count args) (get native-typed-list-operation-arities op))
                          (native-aggregate-of? :list type)
                          (walk value) (walk index)))
                   ;; The list builder (amu ADR 0353 floor :empty-vector-field):
                   ;; the same arena's vector-conj.
                   (= op 'typed-list-conj)
                   (let [[type value item] args]
-                    (and (= 3 (count args))
+                    (and (= (count args) (get native-typed-list-operation-arities op))
                          (native-aggregate-of? :list type)
                          (walk value) (walk item)))
                   ;; `[:map K V]` (amu ADR 0353 floor :native-hiccup-node):
