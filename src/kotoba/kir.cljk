@@ -429,8 +429,13 @@
                                 (<= 1 (count (second type)) max-native-aggregate-members)
                                 (every? #(native-handle-type? % (inc depth) seen)
                                         (second type)))
+                   ;; `[:option :bytes]` (root ADR-2610092310 S4): what
+                   ;; document-bytes-value / document-link-value answer. A
+                   ;; `:bytes` is one vector-arena word, the option a pair
+                   ;; over it. Only the option is widened, not `:bytes` itself.
                    :option (and (= 2 (count type))
-                                (native-handle-type? (second type) (inc depth) seen))
+                                (or (= :bytes (second type))
+                                    (native-handle-type? (second type) (inc depth) seen)))
                    ;; `[:list T]` is a vector-arena handle whose items are
                    ;; words, `[:set T]`'s arena (amu ADR 0353 floor
                    ;; :native-handles); an item is admitted when it is itself
@@ -817,7 +822,10 @@
     document-assoc 3 document-dissoc 2 document-merge :some
     document-string-value 1 document-keyword-value 1 document-symbol-value 1
     document-bool-value 1 document-i64-value 1
-    document-edn-print 1 document-edn-read 1})
+    document-edn-print 1 document-edn-read 1
+    ;; :bytes and :link (root ADR-2610092310 S4): the EDN tagged literals
+    ;; `#kotoba/bytes \"<hex>\"` / `#kotoba/cid \"b<base32>\"` on native.
+    document-bytes 1 document-bytes-value 1 document-link 1 document-link-value 1})
 
 (defn only-native-word-typed-features? [hir]
   (letfn [(walk [form]
