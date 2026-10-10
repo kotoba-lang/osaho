@@ -836,6 +836,13 @@
   registry can read it (root ADR-2610092330 R4)."
   '{typed-list-new :any typed-list-nth 3 typed-list-conj 3})
 
+(def native-i32-operations
+  "The i32 heads native admits. There is no :i32 type: each is an i64 word
+  carrying 32-bit wrapping. xorshift32 is absent. Data so kotoba-lang's
+  operation registry can read it (root ADR-2610092330 R4)."
+  '#{i32-wrap u32-wrap i32-wrapping-add i32-wrapping-mul
+     i32-xor i32-shift-left i32-shift-right u32-shift-right})
+
 (def native-typed-set-operation-arities
   "The [:set T] heads native admits, with their arity counting the type
   argument (typed-set-new: the type then any items). typed-set-new and
@@ -1229,9 +1236,7 @@
                   ;; is no `:i32` type (`kotoba.kir` mentions `:i32` exactly
                   ;; once, as a trap keyword), only i64 words carrying 32-bit
                   ;; wrapping, which both native backends now emit directly.
-                  (contains? '#{i32-wrap u32-wrap i32-wrapping-add i32-wrapping-mul
-                                i32-xor i32-shift-left i32-shift-right u32-shift-right}
-                             op)
+                  (contains? native-i32-operations op)
                   (every? walk args)
 
                   ;; `vector-i64` / `vector-f64` (ADR-2608030300). Admitted for
