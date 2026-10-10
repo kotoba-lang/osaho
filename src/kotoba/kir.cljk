@@ -881,6 +881,13 @@
 (def ^:private native-option-result-binder-positions
   '{option-match #{3} result-match-of #{2 4}})
 
+(def native-safe-value-operation-arities
+  "bool-not and the one-word :option-i64 / :result-i64 heads native admits,
+  with their arity; every argument is walked. The js-* heads are absent. Data
+  so kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '{bool-not 1 option-some 1 option-none 0 option-some? 1 option-value 2
+    result-ok 1 result-err 1 result-ok? 1 result-value 2 result-error 2})
+
 (def native-typed-set-operation-arities
   "The [:set T] heads native admits, with their arity counting the type
   argument (typed-set-new: the type then any items). typed-set-new and
@@ -1120,8 +1127,9 @@
                   ;; and setcc -- the very sequence every comparison there
                   ;; already produces. It needs no representation the one-word
                   ;; slice does not already have.
-                  (= op 'bool-not)
-                  (and (= 1 (count args)) (walk (first args)))
+                  (contains? native-safe-value-operation-arities op)
+                  (and (= (get native-safe-value-operation-arities op) (count args))
+                       (every? walk args))
                   ;; `bit-or` and `bit-not`, for `bool-not`'s reason and by the
                   ;; same measurement. Both are i64 word operations that the
                   ;; frontend, this file's evaluator and both native backends
@@ -1208,18 +1216,6 @@
                                 :cljs (or (i64/bigint-value? shift) (integer? shift)))
                            (<= 0 shift 63)
                            (walk shift))))
-                  (= op 'option-some)
-                  (and (= 1 (count args)) (walk (first args)))
-                  (= op 'option-none)
-                  (empty? args)
-                  (= op 'option-some?)
-                  (and (= 1 (count args)) (walk (first args)))
-                  (= op 'option-value)
-                  (and (= 2 (count args)) (every? walk args))
-                  (contains? '#{result-ok result-err result-ok?} op)
-                  (and (= 1 (count args)) (walk (first args)))
-                  (contains? '#{result-value result-error} op)
-                  (and (= 2 (count args)) (every? walk args))
                   (or (contains? native-generic-option-operation-arities op)
                       (contains? native-parametric-result-operation-arities op))
                   (let [option? (contains? native-generic-option-operation-arities op)
