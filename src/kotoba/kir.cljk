@@ -858,6 +858,14 @@
   kotoba-lang's operation registry (root ADR-2610092330 R4)."
   '#{i64-shift-left i64-shift-right u64-shift-right})
 
+(def native-string-index-operation-arities
+  "The string-index heads native admits, with their arity. kotoba-native lowers
+  a string-index into a private alternating key-handle/value vector. The
+  disjoint-set-i64 heads are absent. Data so kotoba-lang's operation registry
+  can read it (root ADR-2610092330 R4)."
+  '{string-index-new 0 string-index-count 1 string-index-contains 2
+    string-index-get 2 string-index-assoc 3})
+
 (def native-typed-set-operation-arities
   "The [:set T] heads native admits, with their arity counting the type
   argument (typed-set-new: the type then any items). typed-set-new and
@@ -1449,17 +1457,9 @@
                   ;; private alternating key-handle/value vector. The five
                   ;; observable operations stay here in Kotoba machine code;
                   ;; no graph callback or context ABI slot is introduced.
-                  (= op 'string-index-new)
-                  (empty? args)
-
-                  (= op 'string-index-count)
-                  (and (= 1 (count args)) (walk (first args)))
-
-                  (contains? '#{string-index-contains string-index-get} op)
-                  (and (= 2 (count args)) (every? walk args))
-
-                  (= op 'string-index-assoc)
-                  (and (= 3 (count args)) (every? walk args))
+                  (contains? native-string-index-operation-arities op)
+                  (and (= (get native-string-index-operation-arities op) (count args))
+                       (every? walk args))
 
                   ;; `let` MUST be walked explicitly. Without this case it fell
                   ;; to `:else`, which walks `args` -- and the first arg is the
