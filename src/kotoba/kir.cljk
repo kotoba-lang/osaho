@@ -245,6 +245,15 @@
 ;; `keyword-from-string` wanted a general substring and concatenation over a
 ;; runtime handle; both landed 2026-08-04, so both operations are admitted
 ;; below and each backend desugars into exactly them.
+(def native-record-variant-operation-arities
+  "The record and variant heads native admits, with their arity counting the
+  descriptor (record-new: the descriptor then one value per field). Each keeps
+  its own clause, which reads its arity here; a field or tag is a declared
+  keyword literal, and a variant match covers every case in order.
+  record-equal is absent. Data so kotoba-lang's operation registry can read it
+  (root ADR-2610092330 R4)."
+  '{record-new :any record-get 3 record-assoc 4 variant-new 3 variant-match 3})
+
 (def ^:private native-word-field-types #{:i64 :bool :string :keyword :document})
 
 (def native-float-boundary-types
@@ -976,7 +985,7 @@
                   ;; the schema/field are well-formed and keep walking.
                   (= op 'record-get)
                   (let [[type value field] args]
-                    (and (= 3 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-record-type? type)
                              (native-aggregate-of? :record type))
                          (keyword? field)
@@ -990,7 +999,7 @@
                   ;; costs the one cell `record-new` does.
                   (= op 'record-assoc)
                   (let [[type value field replacement] args]
-                    (and (= 4 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-record-type? type)
                              (native-aggregate-of? :record type))
                          (keyword? field)
@@ -1005,7 +1014,7 @@
                   ;; discipline in this file); the payload is walked.
                   (= op 'variant-new)
                   (let [[type tag payload] args]
-                    (and (= 3 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-variant-type? type)
                              (native-aggregate-of? :variant type))
                          (keyword? tag)
@@ -1022,7 +1031,7 @@
                   ;; branch body.
                   (= op 'variant-match)
                   (let [[type value branches] args]
-                    (and (= 3 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-variant-type? type)
                              (native-aggregate-of? :variant type))
                          (vector? branches)
