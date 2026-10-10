@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: kotoba-lang/kotoba/.github/actions/setup-kbb@485a8e9716a330e616ccb5bc9fa5d45104326382
+      - uses: kotoba-lang/setup-kbb@19f38b03b81ad038ff3c0393a2c55ebef8889901
       - name: run-tests.cljk on kbb
         run: |
           set -o pipefail
@@ -65,7 +65,7 @@ jobs:
       - name: Install pinned bootstrap engine package requirement
         working-directory: bootstrap-nbb
         run: npm install --ignore-scripts --no-save import-meta-resolve@4.2.0
-      - uses: kotoba-lang/kotoba/.github/actions/setup-kbb@485a8e9716a330e616ccb5bc9fa5d45104326382
+      - uses: kotoba-lang/setup-kbb@19f38b03b81ad038ff3c0393a2c55ebef8889901
       - name: Author dependency classpath before JVM-free qualification
         run: kbb -Spath -M:test > bootstrap-classpath.txt
       - name: Execute declared portable tests without dependency resolution
