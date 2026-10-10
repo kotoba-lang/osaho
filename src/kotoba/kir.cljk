@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-typed-set-operation-arities native-typed-list-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-typed-set-operation-arities native-typed-list-operation-arities native-string-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -818,6 +818,17 @@
      vector-f64-at vector-f64-drop vector-f64-take
      vector-f64-assoc vector-f64-conj})
 
+(def native-string-operation-arities
+  "String heads native admits BY NAME, with their arity. The base string slice
+  (string-byte-length, string=?, string-concat, string-substring,
+  string-code-point-at, ...) is admitted without being named, by staying out of
+  non-string-typed-ops; these are the ones admitted explicitly. Data so
+  kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '{string-contains? 2 string-replace-all 3
+    string-compare 2 string-fold-ascii 1 string-find-blank 2 string-skip-blank 2
+    string-index-of-from 3 string-compare-lines 4
+    string-find-byte 3 string-append-range 4})
+
 (def native-typed-list-operation-arities
   "The [:list T] heads native admits, with their arity counting the type
   argument (typed-list-new: the type then any items). Each keeps its own
@@ -1378,10 +1389,13 @@
                          (walk value)
                          (or (= op 'hetero-vector-at) (walk item))))
 
-                  (and (= op 'string-contains?) (= 2 (count args)))
-                  (every? walk args)
-
-                  (and (= op 'string-replace-all) (= 3 (count args)))
+                  ;; The string heads native admits by name, with their arity
+                  ;; (native-string-operation-arities): string-contains? /
+                  ;; string-replace-all (rewritten onto the four string
+                  ;; callbacks), and the ABI v7 / v8 / v10 text, line and
+                  ;; range heads (host slots on both native ISAs).
+                  (and (contains? native-string-operation-arities op)
+                       (= (get native-string-operation-arities op) (count args)))
                   (every? walk args)
 
                   ;; `(arena-scope body)`: admitted on native exactly when its
@@ -1391,28 +1405,6 @@
                   ;; launder an operand the slice cannot emit.
                   (and (= op 'arena-scope) (= 1 (count args)))
                   (walk (first args))
-
-                  ;; ABI v7 text operations: host slots on both native ISAs.
-                  (and (= op 'string-compare) (= 2 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-fold-ascii) (= 1 (count args)))
-                  (walk (first args))
-                  (and (= op 'string-find-blank) (= 2 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-skip-blank) (= 2 (count args)))
-                  (every? walk args)
-
-                  ;; ABI v8 line operations: host slots on both native ISAs.
-                  (and (= op 'string-index-of-from) (= 3 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-compare-lines) (= 4 (count args)))
-                  (every? walk args)
-
-                  ;; ABI v10 range operations: host slots on both native ISAs.
-                  (and (= op 'string-find-byte) (= 3 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-append-range) (= 4 (count args)))
-                  (every? walk args)
 
                   ;; Native `:document` is a string-shaped pair handle over
                   ;; its canonical UTF-8 EDN text. The two EDN casts are the
