@@ -888,6 +888,14 @@
   '{bool-not 1 option-some 1 option-none 0 option-some? 1 option-value 2
     result-ok 1 result-err 1 result-ok? 1 result-value 2 result-error 2})
 
+(def native-heterogeneous-vector-operation-arities
+  "The heterogeneous-vector heads native admits, with their arity counting the
+  descriptor (hetero-vector-new: the descriptor then one item per position).
+  Each keeps its own clause, which reads its arity here; an index is a literal
+  in range. hetero-vector-equal is absent. Data so kotoba-lang's operation
+  registry can read it (root ADR-2610092330 R4)."
+  '{hetero-vector-new :any hetero-vector-count 2 hetero-vector-at 3 hetero-vector-assoc 4})
+
 (def native-typed-set-operation-arities
   "The [:set T] heads native admits, with their arity counting the type
   argument (typed-set-new: the type then any items). typed-set-new and
@@ -1386,12 +1394,12 @@
                          (every? walk items)))
                   (= op 'hetero-vector-count)
                   (let [[type value] args]
-                    (and (= 2 (count args))
+                    (and (= (get native-heterogeneous-vector-operation-arities op) (count args))
                          (native-aggregate-of? :vector type)
                          (walk value)))
                   (contains? '#{hetero-vector-at hetero-vector-assoc} op)
                   (let [[type value index item] args]
-                    (and (= (if (= op 'hetero-vector-at) 3 4) (count args))
+                    (and (= (get native-heterogeneous-vector-operation-arities op) (count args))
                          (native-aggregate-of? :vector type)
                          #?(:clj (integer? index)
                             :cljs (or (i64/bigint-value? index) (integer? index)))
