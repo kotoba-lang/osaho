@@ -866,6 +866,21 @@
   '{string-index-new 0 string-index-count 1 string-index-contains 2
     string-index-get 2 string-index-assoc 3})
 
+;; The type-argument option and result heads native admits, with their arity
+;; counting the type argument. The type must be a native handle type; a match
+;; form's binder positions take an unqualified symbol, every other argument is
+;; walked. Data so kotoba-lang's operation registry can read them (root
+;; ADR-2610092330 R4).
+(def native-generic-option-operation-arities
+  '{option-none-of 1 option-some-of 2 option-some?-of 2 option-value-of 3 option-match 5})
+
+(def native-parametric-result-operation-arities
+  '{result-ok-of 2 result-err-of 2 result-ok?-of 2 result-value-of 3 result-error-of 3
+    result-match-of 6})
+
+(def ^:private native-option-result-binder-positions
+  '{option-match #{3} result-match-of #{2 4}})
+
 (def native-typed-set-operation-arities
   "The [:set T] heads native admits, with their arity counting the type
   argument (typed-set-new: the type then any items). typed-set-new and
@@ -1205,49 +1220,20 @@
                   (and (= 1 (count args)) (walk (first args)))
                   (contains? '#{result-value result-error} op)
                   (and (= 2 (count args)) (every? walk args))
-                  (contains? '#{option-some-of option-some?-of} op)
-                  (let [[type value] args]
-                    (and (= 2 (count args))
-                         (vector? type) (= :option (first type))
+                  (or (contains? native-generic-option-operation-arities op)
+                      (contains? native-parametric-result-operation-arities op))
+                  (let [option? (contains? native-generic-option-operation-arities op)
+                        arity (get (if option?
+                                     native-generic-option-operation-arities
+                                     native-parametric-result-operation-arities)
+                                   op)
+                        binders (get native-option-result-binder-positions op #{})
+                        [type & more] args]
+                    (and (= arity (count args))
+                         (vector? type) (= (if option? :option :result) (first type))
                          (native-handle-type? type)
-                         (walk value)))
-                  (= op 'option-none-of)
-                  (let [[type] args]
-                    (and (= 1 (count args))
-                         (vector? type) (= :option (first type))
-                         (native-handle-type? type)))
-                  (= op 'option-value-of)
-                  (let [[type value fallback] args]
-                    (and (= 3 (count args))
-                         (vector? type) (= :option (first type))
-                         (native-handle-type? type)
-                         (walk value) (walk fallback)))
-                  (= op 'option-match)
-                  (let [[type value none-body binder some-body] args]
-                    (and (= 5 (count args))
-                         (vector? type) (= :option (first type))
-                         (native-handle-type? type)
-                         (symbol? binder)
-                         (walk value) (walk none-body) (walk some-body)))
-                  (contains? '#{result-ok-of result-err-of result-ok?-of} op)
-                  (let [[type value] args]
-                    (and (= 2 (count args))
-                         (vector? type) (= :result (first type))
-                         (native-handle-type? type)
-                         (walk value)))
-                  (contains? '#{result-value-of result-error-of} op)
-                  (let [[type value fallback] args]
-                    (and (= 3 (count args))
-                         (vector? type) (= :result (first type))
-                         (native-handle-type? type)
-                         (walk value) (walk fallback)))
-                  (= op 'result-match-of)
-                  (let [[type value ok-binder ok-body err-binder err-body] args]
-                    (and (= 6 (count args))
-                         (vector? type) (= :result (first type))
-                         (native-handle-type? type)
-                         (symbol? ok-binder) (symbol? err-binder)
-                         (walk value) (walk ok-body) (walk err-body)))
+                         (every? (fn [[i arg]] (if (contains? binders i) (symbol? arg) (walk arg)))
+                                 (map vector (range 1 arity) more))))
                   ;; `i32-operations` are admitted on native. They stay in
                   ;; `non-string-typed-ops` -- the CLJS gate below shares that
                   ;; set and does NOT implement them (measured 2026-08-03:
