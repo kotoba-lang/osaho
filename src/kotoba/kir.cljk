@@ -843,6 +843,21 @@
   '#{i32-wrap u32-wrap i32-wrapping-add i32-wrapping-mul
      i32-xor i32-shift-left i32-shift-right u32-shift-right})
 
+(def native-i64-bitwise-operations
+  "bit-or (any arity) and bit-not, admitted on native by name. Data so
+  kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '#{bit-or bit-not})
+
+(def native-i64-min-max-operations
+  "Binary min and max on i64 words, admitted on native. Data for kotoba-lang's
+  operation registry (root ADR-2610092330 R4)."
+  '#{min max})
+
+(def native-i64-shift-operations
+  "The 64-bit shifts native admits; a literal count must be in [0,63]. Data for
+  kotoba-lang's operation registry (root ADR-2610092330 R4)."
+  '#{i64-shift-left i64-shift-right u64-shift-right})
+
 (def native-typed-set-operation-arities
   "The [:set T] heads native admits, with their arity counting the type
   argument (typed-set-new: the type then any items). typed-set-new and
@@ -1112,7 +1127,7 @@
                   ;; must be an integer literal in range, which is what lets a
                   ;; backend lower them onto CL without a mask -- and this
                   ;; increment measured `bit-or` and `bit-not`, not them.
-                  (contains? '#{bit-or bit-not} op)
+                  (contains? native-i64-bitwise-operations op)
                   (every? walk args)
                   ;; i64 `min` / `max`, widened 2026-09-26 (superproject
                   ;; adr-2609242330, selfhost stage 2). They sat in
@@ -1126,7 +1141,7 @@
                   ;; The frontend declares both strictly binary
                   ;; (`kotoba.compiler.frontend/i64-operations`); that arity is
                   ;; re-derived here rather than trusted.
-                  (contains? '#{min max} op)
+                  (contains? native-i64-min-max-operations op)
                   (and (= 2 (count args)) (every? walk args))
                   ;; The shift family, widened 2026-09-08. The comment above
                   ;; gave the reason for their absence as "this increment
@@ -1162,7 +1177,7 @@
                   ;; mod 64, so an unguarded lowering would disagree with this
                   ;; interpreter -- the sealed oracle failure the x86 emitter's
                   ;; own comment warns about two paragraphs above its shifts.
-                  (contains? '#{i64-shift-left i64-shift-right u64-shift-right} op)
+                  (contains? native-i64-shift-operations op)
                   (let [[value shift] args]
                     (and (= 2 (count args))
                          (walk value)
