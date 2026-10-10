@@ -7,17 +7,19 @@ on:
 
 jobs:
   test:
+    # osaho's suite is .cljk, run by run-tests.cljk on kbb (JVM-free).
+    # `clojure -M:test` found none of it and reported "Ran 0 tests" as success
+    # (root ADR-2610100200). A run of zero tests fails here.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-      - uses: DeLaGuardo/setup-clojure@13.4
-        with:
-          cli: latest
-      - run: clojure -M:test
+      - uses: kotoba-lang/setup-kbb@a4586e48c72c69229ff1237a1246de63583b607d
+      - name: run-tests.cljk on kbb
+        run: |
+          set -o pipefail
+          kbb --backend sci --classpath "src:test:$(kbb -Spath -M:test)" run-tests.cljk 2>&1 | tee run-tests.log
+          grep -E '^Ran [1-9][0-9]* tests containing [0-9]+ assertions\.$' run-tests.log
+          grep -E '^0 failures, 0 errors\.$' run-tests.log
 
   # This repo's own suite passing is not enough: it is a library whose only
   # consumer is kotoba-lang/compiler, and a change can be green here while
@@ -63,14 +65,8 @@ jobs:
       - name: Install pinned bootstrap engine package requirement
         working-directory: bootstrap-nbb
         run: npm install --ignore-scripts --no-save import-meta-resolve@4.2.0
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-      - uses: DeLaGuardo/setup-clojure@13.4
-        with:
-          cli: latest
+      - uses: kotoba-lang/setup-kbb@a4586e48c72c69229ff1237a1246de63583b607d
       - name: Author dependency classpath before JVM-free qualification
-        run: clojure -Spath -M:test > bootstrap-classpath.txt
+        run: kbb -Spath -M:test > bootstrap-classpath.txt
       - name: Execute declared portable tests without dependency resolution
         run: node scripts/test-js-operations.mjs bootstrap-nbb/cli.js bootstrap-classpath.txt
