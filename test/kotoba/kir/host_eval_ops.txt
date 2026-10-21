@@ -31,6 +31,8 @@ do
 document-assoc
 document-bool
 document-bool-value
+document-bytes
+document-bytes-value
 document-contains
 document-count
 document-dissoc
@@ -45,6 +47,8 @@ document-i64-value
 document-keyword
 document-keyword-value
 document-kind
+document-link
+document-link-value
 document-list
 document-list-at
 document-map
@@ -135,6 +139,15 @@ i64-to-f32-rounded
 i64-to-f64-checked
 i64-to-f64-rounded
 if
+js-array?
+js-bool-value
+js-capture-new
+js-capture-value
+js-nullish?
+js-strict-equal?
+js-truthy?
+js-typeof
+js-undefined
 kernel-atomic-add-u32
 kernel-atomic-add-u64
 kernel-boot-info

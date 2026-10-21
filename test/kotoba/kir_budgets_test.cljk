@@ -59,6 +59,18 @@
   (testing "unmetered by default: no budget named, no cells trap"
     (is (= "1" (str (kir/execute build-five 'main []))))))
 
+(deftest a-constructor-debits-fuel-whether-or-not-cells-are-metered
+  ;; amu ADR 0353 point 7: 7 function entries (main, the loop's first entry,
+  ;; five kons) + 11 constructed cells = 18 units of fuel, with no cells
+  ;; budget named. Before this floor the run answered at 7.
+  (is (= "1" (str (kir/execute build-five 'main [] {:fuel 18}))))
+  (is (= :budget/fuel (trap-of #(kir/execute build-five 'main [] {:fuel 17}))))
+  (is (= :budget/fuel (trap-of #(kir/execute build-five 'main [] {:fuel 7})))
+      "the entries alone no longer pay for the list")
+  (testing "the cells ledger still counts its own unit beside it"
+    (is (= "1" (str (kir/execute build-five 'main [] {:fuel 18 :cells 11}))))
+    (is (= :budget/cells (trap-of #(kir/execute build-five 'main [] {:fuel 18 :cells 10}))))))
+
 (deftest bytes-is-a-per-run-budget-with-a-named-trap
   (is (= "6" (str (kir/execute concat-six 'main [] {:bytes 6}))))
   (is (= :budget/bytes (trap-of #(kir/execute concat-six 'main [] {:bytes 5}))))

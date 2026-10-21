@@ -1,5 +1,5 @@
 (ns kotoba.kir
-  {:kotoba/export [*runtime-schemas* native-bytes-operations native-export-codec-types budget-traps default-frames max-frames eval-expr execute host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
+  {:kotoba/export [*runtime-schemas* native-bytes-operations native-vector-operations native-typed-map-operation-arities native-typed-set-operation-arities native-typed-list-operation-arities native-string-operation-arities native-export-codec-types budget-traps default-frames max-frames eval-expr execute execute-metered host-stack-exhausted? lower max-fuel native-boundary-type-refusal native-program oracle-inconclusive-trap recursive-schema-table? native-erased-source-carrier-types native-f32-arithmetic-operations native-f32-comparison-operations native-f64-arithmetic-operations native-f64-comparison-operations native-float-boundary-types native-float-width-conversions native-floating-point-operations native-unadmitted-boundary-types non-string-typed-ops only-cljs-provider-typed-features? only-native-word-typed-features? uses-f32? uses-f64?]}
   ;; The whole `:require` clause (not just an item inside it) is behind the
   ;; reader-conditional: on `:clj` this file needs no extra require at all
   ;; (matching the original `(ns kotoba.kir)`), and an EMPTY
@@ -10,10 +10,13 @@
   (:require [kotoba.lang.text :as str]
             [kotoba.hir :as hir]
             [kotoba.kir.value :as value]
+            [kotoba.kir.js-operations :as js-operations]
             [kotoba.kir.iq-codebook :as iq]
             [kotoba.kir.decimal :as decimal]
             [kotoba.kir.xml :as xml]
-            #?@(:cljs [[kotoba.kir.cljs-i64 :as i64]])))
+            [kotoba.kir.gas :as gas]
+            #?@(:cljs [[kotoba.kir.cljs-i64 :as i64]
+                       ["./kir/js_host.mjs" :as js-host]])))
 
 (def ^:private default-fuel 512)
 
@@ -162,6 +165,8 @@
      f64-eq f64-lt f64-le f64-gt f64-ge f64-unordered
      i64-to-f64-checked i64-to-f64-rounded f64-to-i64-checked f64-to-i64-truncating
      map-new map-get map-assoc
+     js-nullish? js-truthy? js-strict-equal? js-typeof js-array? js-bool-value js-undefined
+     js-capture-new js-capture-value
      bool-not option-some option-none option-some? option-value
      result-ok result-err result-ok? result-value result-error
      result-ok-of result-err-of result-ok?-of result-value-of result-error-of result-match-of
@@ -189,6 +194,7 @@
      document-assoc document-dissoc document-merge document-string-value document-keyword-value document-symbol-value
      document-bool-value document-i64-value document-f64-value document-sha256 document-print document-read
      document-edn-print document-edn-read
+     document-bytes document-bytes-value document-link document-link-value
      i32-wrap u32-wrap i32-wrapping-add i32-wrapping-mul i32-xor
      i32-shift-left i32-shift-right u32-shift-right xorshift32
      bit-or bit-not i64-shift-left i64-shift-right u64-shift-right min max
@@ -239,6 +245,15 @@
 ;; `keyword-from-string` wanted a general substring and concatenation over a
 ;; runtime handle; both landed 2026-08-04, so both operations are admitted
 ;; below and each backend desugars into exactly them.
+(def native-record-variant-operation-arities
+  "The record and variant heads native admits, with their arity counting the
+  descriptor (record-new: the descriptor then one value per field). Each keeps
+  its own clause, which reads its arity here; a field or tag is a declared
+  keyword literal, and a variant match covers every case in order.
+  record-equal is absent. Data so kotoba-lang's operation registry can read it
+  (root ADR-2610092330 R4)."
+  '{record-new :any record-get 3 record-assoc 4 variant-new 3 variant-match 3})
+
 (def ^:private native-word-field-types #{:i64 :bool :string :keyword :document})
 
 (def native-float-boundary-types
@@ -282,7 +297,9 @@
 (defn- native-scalar-record-type? [type]
   (and (vector? type) (= 3 (count type)) (= :record (first type))
        (keyword? (second type)) (some? (namespace (second type)))
-       (vector? (nth type 2)) (seq (nth type 2))
+       ;; No fields is admitted: `{}` passed as an options map (amu ADR 0353
+       ;; floor :options-map-argument), the empty pair chain natively.
+       (vector? (nth type 2))
        ;; A field may also be a record, which the backends FLATTEN into the
        ;; enclosing record's own slots -- recursively -- so a nested record
        ;; still never needs a runtime representation of its own. The criterion
@@ -383,6 +400,10 @@
 
 (declare native-handle-type?)
 
+(def ^:private native-map-key-types
+  "Key types of a native `[:map K V]`: one word each, compared by content."
+  #{:i64 :bool :string :keyword})
+
 (defn- native-member-list? [members depth seen]
   (and (vector? members) (<= 1 (count members) max-native-aggregate-members)
        (every? #(and (vector? %) (= 2 (count %)) (keyword? (first %))
@@ -393,7 +414,12 @@
 (defn- native-handle-type?
   "True when TYPE travels as one native word: a scalar, a pair-backed
   string/option/result, or a record / variant / heterogeneous vector whose
-  members are themselves such words, including through `[:ref ...]`."
+  members are themselves such words, including through `[:ref ...]`.
+  A `:vector-i64` is one word too -- a handle into the context's vector arena
+  -- so it is a member like any other (amu ADR 0353 floor
+  :native-vector-field: browser.text-edit's `:text/selection [start end]`).
+  It stays off `native-boundary-type?`: an aggregate holding one is an
+  internal value, never an export's, as the vector alone already was."
   ([type] (native-handle-type? type 0 #{}))
   ([type depth seen]
    (and (<= depth max-native-aggregate-depth)
@@ -422,17 +448,30 @@
                                 (<= 1 (count (second type)) max-native-aggregate-members)
                                 (every? #(native-handle-type? % (inc depth) seen)
                                         (second type)))
+                   ;; `[:option :bytes]` (root ADR-2610092310 S4): what
+                   ;; document-bytes-value / document-link-value answer. A
+                   ;; `:bytes` is one vector-arena word, the option a pair
+                   ;; over it. Only the option is widened, not `:bytes` itself.
+                   ;; (`:bytes` is also an aggregate member through
+                   ;; `native-aggregate-member-handle-types`, so this arm is a
+                   ;; no-op superset kept for the option's own reading.)
                    :option (and (= 2 (count type))
-                                (native-handle-type? (second type) (inc depth) seen))
-                   ;; A list of aggregate handles: the vector arena's items are
-                   ;; machine words and a record/variant/option handle IS one
-                   ;; word, so `[:list [:ref :form/r]]` needs no representation
-                   ;; of its own (docs/selfhost-native-aggregate-lists-design.md).
-                   ;; Only the list: `typed-list-new/conj/nth` and `vector-count`
-                   ;; never compare items. A `[:set T]` of handles stays refused
-                   ;; because membership would compare cells, not values.
+                                (or (= :bytes (second type))
+                                    (native-handle-type? (second type) (inc depth) seen)))
+                   ;; `[:list T]` is a vector-arena handle whose items are
+                   ;; words, `[:set T]`'s arena (amu ADR 0353 floor
+                   ;; :native-handles); an item is admitted when it is itself
+                   ;; one word, a record handle through `[:ref q]` included.
                    :list (and (= 2 (count type))
                               (native-handle-type? (second type) (inc depth) seen))
+                   ;; `[:map K V]` is the same word arena, keys and values
+                   ;; interleaved (amu ADR 0353 floor :native-hiccup-node). A
+                   ;; key is a scalar whose equality native code already has
+                   ;; -- a word compare for i64 / bool, `string=?` for a
+                   ;; string or keyword -- and a value any one-word handle.
+                   :map (and (= 3 (count type))
+                             (contains? native-map-key-types (second type))
+                             (native-handle-type? (nth type 2) (inc depth) seen))
                    :result (and (= 3 (count type))
                                 (native-handle-type? (second type) (inc depth) seen)
                                 (native-handle-type? (nth type 2) (inc depth) seen))
@@ -776,16 +815,139 @@
                 false)))]
     (boolean (and (map? table) (some reaches? (keys table))))))
 
+(defn- signature-schema-reference?
+  "True when some function's `:param-types` or `:result` names `[:ref q]` --
+  the one place a reference survives lowering (every body operation carries
+  its descriptor expanded)."
+  [functions]
+  (boolean
+   (some (fn [{:keys [param-types result]}]
+           (some #(and (vector? %) (= 2 (count %)) (= :ref (first %)))
+                 (mapcat #(tree-seq coll? seq %) (cond-> (vec param-types) result (conj result)))))
+         functions)))
+
 (defn native-program
   "The closed program a native artifact seals and its verifier re-executes.
 
-  `:schemas` joins it only for a RECURSIVE table. A recursive type cannot be
-  expanded into its signatures, so without the table the verifier's oracle
-  cannot resolve `[:ref q]` and refuses the artifact. A non-recursive table
-  is left out exactly as before, so no existing module's `:kir-sha256` moves."
+  `:schemas` joins it when the verifier's oracle needs it to resolve a
+  `[:ref q]`: for a RECURSIVE table, and whenever a function's signature
+  names a reference (a declared record crossing a function boundary, amu ADR
+  0353 floor :native-record-boundary). Without it the oracle traps
+  `:unknown-schema-reference` and the artifact is refused. A table no
+  signature reaches is left out exactly as before, so a module whose
+  references are all expanded into its bodies keeps its `:kir-sha256`."
   [kir]
   (cond-> (select-keys kir [:format :entry :exports :signature :effects :functions])
-    (recursive-schema-table? (:schemas kir)) (assoc :schemas (:schemas kir))))
+    (and (map? (:schemas kir))
+         (or (recursive-schema-table? (:schemas kir))
+             (signature-schema-reference? (:functions kir))))
+    (assoc :schemas (:schemas kir))))
+
+(def native-vector-operations
+  "The vector heads native admits (the i64 and f64 families; one clause in
+  only-native-word-typed-features?). Data rather than an inline literal so
+  kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '#{vector-new vector-alloc vector-count vector-get vector-at
+     vector-drop vector-take vector-assoc vector-assoc! vector-conj
+     vector-f64-new vector-f64-count vector-f64-get
+     vector-f64-at vector-f64-drop vector-f64-take
+     vector-f64-assoc vector-f64-conj})
+
+(def native-string-operation-arities
+  "String heads native admits BY NAME, with their arity. The base string slice
+  (string-byte-length, string=?, string-concat, string-substring,
+  string-code-point-at, ...) is admitted without being named, by staying out of
+  non-string-typed-ops; these are the ones admitted explicitly. Data so
+  kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '{string-contains? 2 string-replace-all 3
+    string-compare 2 string-fold-ascii 1 string-find-blank 2 string-skip-blank 2
+    string-index-of-from 3 string-compare-lines 4
+    string-find-byte 3 string-append-range 4})
+
+(def native-typed-list-operation-arities
+  "The [:list T] heads native admits, with their arity counting the type
+  argument (typed-list-new: the type then any items). Each keeps its own
+  clause; nth and conj read their arity here. Data so kotoba-lang's operation
+  registry can read it (root ADR-2610092330 R4)."
+  '{typed-list-new :any typed-list-nth 3 typed-list-conj 3})
+
+(def native-i32-operations
+  "The i32 heads native admits. There is no :i32 type: each is an i64 word
+  carrying 32-bit wrapping. xorshift32 is absent. Data so kotoba-lang's
+  operation registry can read it (root ADR-2610092330 R4)."
+  '#{i32-wrap u32-wrap i32-wrapping-add i32-wrapping-mul
+     i32-xor i32-shift-left i32-shift-right u32-shift-right})
+
+(def native-i64-bitwise-operations
+  "bit-or (any arity) and bit-not, admitted on native by name. Data so
+  kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '#{bit-or bit-not})
+
+(def native-i64-min-max-operations
+  "Binary min and max on i64 words, admitted on native. Data for kotoba-lang's
+  operation registry (root ADR-2610092330 R4)."
+  '#{min max})
+
+(def native-i64-shift-operations
+  "The 64-bit shifts native admits; a literal count must be in [0,63]. Data for
+  kotoba-lang's operation registry (root ADR-2610092330 R4)."
+  '#{i64-shift-left i64-shift-right u64-shift-right})
+
+(def native-string-index-operation-arities
+  "The string-index heads native admits, with their arity. kotoba-native lowers
+  a string-index into a private alternating key-handle/value vector. The
+  disjoint-set-i64 heads are absent. Data so kotoba-lang's operation registry
+  can read it (root ADR-2610092330 R4)."
+  '{string-index-new 0 string-index-count 1 string-index-contains 2
+    string-index-get 2 string-index-assoc 3})
+
+;; The type-argument option and result heads native admits, with their arity
+;; counting the type argument. The type must be a native handle type; a match
+;; form's binder positions take an unqualified symbol, every other argument is
+;; walked. Data so kotoba-lang's operation registry can read them (root
+;; ADR-2610092330 R4).
+(def native-generic-option-operation-arities
+  '{option-none-of 1 option-some-of 2 option-some?-of 2 option-value-of 3 option-match 5})
+
+(def native-parametric-result-operation-arities
+  '{result-ok-of 2 result-err-of 2 result-ok?-of 2 result-value-of 3 result-error-of 3
+    result-match-of 6})
+
+(def ^:private native-option-result-binder-positions
+  '{option-match #{3} result-match-of #{2 4}})
+
+(def native-safe-value-operation-arities
+  "bool-not and the one-word :option-i64 / :result-i64 heads native admits,
+  with their arity; every argument is walked. The js-* heads are absent. Data
+  so kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '{bool-not 1 option-some 1 option-none 0 option-some? 1 option-value 2
+    result-ok 1 result-err 1 result-ok? 1 result-value 2 result-error 2})
+
+(def native-heterogeneous-vector-operation-arities
+  "The heterogeneous-vector heads native admits, with their arity counting the
+  descriptor (hetero-vector-new: the descriptor then one item per position).
+  Each keeps its own clause, which reads its arity here; an index is a literal
+  in range. hetero-vector-equal is absent. Data so kotoba-lang's operation
+  registry can read it (root ADR-2610092330 R4)."
+  '{hetero-vector-new :any hetero-vector-count 2 hetero-vector-at 3 hetero-vector-assoc 4})
+
+(def native-typed-set-operation-arities
+  "The [:set T] heads native admits, with their arity counting the type
+  argument (typed-set-new: the type then any items). typed-set-new and
+  typed-set-conj keep their own clauses; count and nth share one, which (as
+  before) does not check arity. Not here, so hosted: contains, disj, equal.
+  Data so kotoba-lang's operation registry can read it (root ADR-2610092330
+  R4)."
+  '{typed-set-new :any typed-set-conj 3 typed-set-count 2 typed-set-nth 3})
+
+(def native-typed-map-operation-arities
+  "The [:map K V] heads native admits, with their arity counting the type
+  argument (typed-map-new: the type then key/value pairs, :even). Not here,
+  so hosted: typed-map-entry-at, -keys, -vals, -equal (entry order and map
+  equality are not observable on native). Data rather than an inline literal
+  so kotoba-lang's operation registry can read it (root ADR-2610092330 R4)."
+  '{typed-map-new :even typed-map-count 2 typed-map-contains 3 typed-map-get 3
+    typed-map-assoc 4 typed-map-dissoc 3})
 
 (def native-document-operation-arities
   "Document operations native admits (gap 2 of the selfhost foundation), with
@@ -801,7 +963,10 @@
     document-assoc 3 document-dissoc 2 document-merge :some
     document-string-value 1 document-keyword-value 1 document-symbol-value 1
     document-bool-value 1 document-i64-value 1
-    document-edn-print 1 document-edn-read 1})
+    document-edn-print 1 document-edn-read 1
+    ;; :bytes and :link (root ADR-2610092310 S4): the EDN tagged literals
+    ;; `#kotoba/bytes \"<hex>\"` / `#kotoba/cid \"b<base32>\"` on native.
+    document-bytes 1 document-bytes-value 1 document-link 1 document-link-value 1})
 
 (defn only-native-word-typed-features? [hir]
   (letfn [(walk [form]
@@ -846,24 +1011,27 @@
                   ;; the schema/field are well-formed and keep walking.
                   (= op 'record-get)
                   (let [[type value field] args]
-                    (and (= 3 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-record-type? type)
                              (native-aggregate-of? :record type))
                          (keyword? field)
                          (some #(= field (first %)) (nth type 2))
                          (walk value)))
-                  ;; Functional update: the same schema/field shape as the
-                  ;; projection above; both operands are walked. The backend
-                  ;; rebuilds the record (kotoba-native `normalize-surface-
-                  ;; operations`), `kotoba.verifier` re-derives the check.
+                  ;; Update: a record with one field replaced, the same record
+                  ;; type (amu ADR 0353 floor :native-record-operations). Both
+                  ;; native backends lower it to a fresh record -- a pair chain
+                  ;; that re-projects every other field, or a new slot bundle --
+                  ;; so it needs no representation `record-new` lacks, and
+                  ;; costs the one cell `record-new` does.
                   (= op 'record-assoc)
                   (let [[type value field replacement] args]
-                    (and (= 4 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-record-type? type)
                              (native-aggregate-of? :record type))
                          (keyword? field)
                          (some #(= field (first %)) (nth type 2))
-                         (walk value) (walk replacement)))
+                         (walk value)
+                         (walk replacement)))
                   ;; Construction: the tag must be a declared case (frontend
                   ;; already enforces this too, unconditionally, via
                   ;; `infer-expression-type`'s own "variant constructor tag
@@ -872,7 +1040,7 @@
                   ;; discipline in this file); the payload is walked.
                   (= op 'variant-new)
                   (let [[type tag payload] args]
-                    (and (= 3 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-variant-type? type)
                              (native-aggregate-of? :variant type))
                          (keyword? tag)
@@ -889,7 +1057,7 @@
                   ;; branch body.
                   (= op 'variant-match)
                   (let [[type value branches] args]
-                    (and (= 3 (count args))
+                    (and (= (get native-record-variant-operation-arities op) (count args))
                          (or (native-scalar-variant-type? type)
                              (native-aggregate-of? :variant type))
                          (vector? branches)
@@ -1009,8 +1177,9 @@
                   ;; and setcc -- the very sequence every comparison there
                   ;; already produces. It needs no representation the one-word
                   ;; slice does not already have.
-                  (= op 'bool-not)
-                  (and (= 1 (count args)) (walk (first args)))
+                  (contains? native-safe-value-operation-arities op)
+                  (and (= (get native-safe-value-operation-arities op) (count args))
+                       (every? walk args))
                   ;; `bit-or` and `bit-not`, for `bool-not`'s reason and by the
                   ;; same measurement. Both are i64 word operations that the
                   ;; frontend, this file's evaluator and both native backends
@@ -1039,7 +1208,7 @@
                   ;; must be an integer literal in range, which is what lets a
                   ;; backend lower them onto CL without a mask -- and this
                   ;; increment measured `bit-or` and `bit-not`, not them.
-                  (contains? '#{bit-or bit-not} op)
+                  (contains? native-i64-bitwise-operations op)
                   (every? walk args)
                   ;; i64 `min` / `max`, widened 2026-09-26 (superproject
                   ;; adr-2609242330, selfhost stage 2). They sat in
@@ -1053,7 +1222,7 @@
                   ;; The frontend declares both strictly binary
                   ;; (`kotoba.compiler.frontend/i64-operations`); that arity is
                   ;; re-derived here rather than trusted.
-                  (contains? '#{min max} op)
+                  (contains? native-i64-min-max-operations op)
                   (and (= 2 (count args)) (every? walk args))
                   ;; The shift family, widened 2026-09-08. The comment above
                   ;; gave the reason for their absence as "this increment
@@ -1089,7 +1258,7 @@
                   ;; mod 64, so an unguarded lowering would disagree with this
                   ;; interpreter -- the sealed oracle failure the x86 emitter's
                   ;; own comment warns about two paragraphs above its shifts.
-                  (contains? '#{i64-shift-left i64-shift-right u64-shift-right} op)
+                  (contains? native-i64-shift-operations op)
                   (let [[value shift] args]
                     (and (= 2 (count args))
                          (walk value)
@@ -1097,61 +1266,20 @@
                                 :cljs (or (i64/bigint-value? shift) (integer? shift)))
                            (<= 0 shift 63)
                            (walk shift))))
-                  (= op 'option-some)
-                  (and (= 1 (count args)) (walk (first args)))
-                  (= op 'option-none)
-                  (empty? args)
-                  (= op 'option-some?)
-                  (and (= 1 (count args)) (walk (first args)))
-                  (= op 'option-value)
-                  (and (= 2 (count args)) (every? walk args))
-                  (contains? '#{result-ok result-err result-ok?} op)
-                  (and (= 1 (count args)) (walk (first args)))
-                  (contains? '#{result-value result-error} op)
-                  (and (= 2 (count args)) (every? walk args))
-                  (contains? '#{option-some-of option-some?-of} op)
-                  (let [[type value] args]
-                    (and (= 2 (count args))
-                         (vector? type) (= :option (first type))
+                  (or (contains? native-generic-option-operation-arities op)
+                      (contains? native-parametric-result-operation-arities op))
+                  (let [option? (contains? native-generic-option-operation-arities op)
+                        arity (get (if option?
+                                     native-generic-option-operation-arities
+                                     native-parametric-result-operation-arities)
+                                   op)
+                        binders (get native-option-result-binder-positions op #{})
+                        [type & more] args]
+                    (and (= arity (count args))
+                         (vector? type) (= (if option? :option :result) (first type))
                          (native-handle-type? type)
-                         (walk value)))
-                  (= op 'option-none-of)
-                  (let [[type] args]
-                    (and (= 1 (count args))
-                         (vector? type) (= :option (first type))
-                         (native-handle-type? type)))
-                  (= op 'option-value-of)
-                  (let [[type value fallback] args]
-                    (and (= 3 (count args))
-                         (vector? type) (= :option (first type))
-                         (native-handle-type? type)
-                         (walk value) (walk fallback)))
-                  (= op 'option-match)
-                  (let [[type value none-body binder some-body] args]
-                    (and (= 5 (count args))
-                         (vector? type) (= :option (first type))
-                         (native-handle-type? type)
-                         (symbol? binder)
-                         (walk value) (walk none-body) (walk some-body)))
-                  (contains? '#{result-ok-of result-err-of result-ok?-of} op)
-                  (let [[type value] args]
-                    (and (= 2 (count args))
-                         (vector? type) (= :result (first type))
-                         (native-handle-type? type)
-                         (walk value)))
-                  (contains? '#{result-value-of result-error-of} op)
-                  (let [[type value fallback] args]
-                    (and (= 3 (count args))
-                         (vector? type) (= :result (first type))
-                         (native-handle-type? type)
-                         (walk value) (walk fallback)))
-                  (= op 'result-match-of)
-                  (let [[type value ok-binder ok-body err-binder err-body] args]
-                    (and (= 6 (count args))
-                         (vector? type) (= :result (first type))
-                         (native-handle-type? type)
-                         (symbol? ok-binder) (symbol? err-binder)
-                         (walk value) (walk ok-body) (walk err-body)))
+                         (every? (fn [[i arg]] (if (contains? binders i) (symbol? arg) (walk arg)))
+                                 (map vector (range 1 arity) more))))
                   ;; `i32-operations` are admitted on native. They stay in
                   ;; `non-string-typed-ops` -- the CLJS gate below shares that
                   ;; set and does NOT implement them (measured 2026-08-03:
@@ -1163,9 +1291,7 @@
                   ;; is no `:i32` type (`kotoba.kir` mentions `:i32` exactly
                   ;; once, as a trap keyword), only i64 words carrying 32-bit
                   ;; wrapping, which both native backends now emit directly.
-                  (contains? '#{i32-wrap u32-wrap i32-wrapping-add i32-wrapping-mul
-                                i32-xor i32-shift-left i32-shift-right u32-shift-right}
-                             op)
+                  (contains? native-i32-operations op)
                   (every? walk args)
 
                   ;; `vector-i64` / `vector-f64` (ADR-2608030300). Admitted for
@@ -1194,12 +1320,7 @@
                   ;; one host call per element; the element-count bound that
                   ;; makes that expansion finite is `vector-item-limit`, and it
                   ;; is enforced where the value is built, not here.
-                  (contains? '#{vector-new vector-alloc vector-count vector-get vector-at
-                                vector-drop vector-take vector-assoc vector-assoc! vector-conj
-                                vector-f64-new vector-f64-count vector-f64-get
-                                vector-f64-at vector-f64-drop vector-f64-take
-                                vector-f64-assoc vector-f64-conj}
-                             op)
+                  (contains? native-vector-operations op)
                   (every? walk args)
                   ;; `:bytes` (2026-09-25, superproject adr-2609242330). On
                   ;; native a bytes value is a vector-arena handle whose items
@@ -1226,31 +1347,51 @@
                          (vector? type) (= :set (first type))
                          (native-word-value-type? type)
                          (walk value) (walk item)))
-                  (contains? '#{typed-set-count typed-set-nth} op)
+                  (contains? (disj (set (keys native-typed-set-operation-arities))
+                                   'typed-set-new 'typed-set-conj) op)
                   (let [[type & rest] args]
                     (and (vector? type) (= :set (first type))
                          (native-word-value-type? type)
                          (every? walk rest)))
-                  ;; `[:list T]` is the same word arena as a typed set on native:
-                  ;; new, conj (append at the end) and nth lower to the vector
-                  ;; heads (kotoba-native machine_ir); `vector-count` already
-                  ;; walks the carrier.
+                  ;; `[:list T]` (amu ADR 0353 floor :native-handles): the
+                  ;; typed set's word arena, so kotoba-native lowers new to
+                  ;; vector-conj and nth to vector-at, and `vector-count`, which
+                  ;; the frontend already emits for `count`, walks the carrier.
+                  ;; The item type is any one-word handle, a record included.
+                  ;; No `typed-list-equal`: equality over handles stays refused.
                   (= op 'typed-list-new)
                   (let [[type & items] args]
-                    (and (vector? type) (= :list (first type))
-                         (native-handle-type? type)
+                    (and (native-aggregate-of? :list type)
                          (every? walk items)))
+                  (= op 'typed-list-nth)
+                  (let [[type value index] args]
+                    (and (= (count args) (get native-typed-list-operation-arities op))
+                         (native-aggregate-of? :list type)
+                         (walk value) (walk index)))
+                  ;; The list builder (amu ADR 0353 floor :empty-vector-field):
+                  ;; the same arena's vector-conj.
                   (= op 'typed-list-conj)
                   (let [[type value item] args]
-                    (and (= 3 (count args))
-                         (vector? type) (= :list (first type))
-                         (native-handle-type? type)
+                    (and (= (count args) (get native-typed-list-operation-arities op))
+                         (native-aggregate-of? :list type)
                          (walk value) (walk item)))
-                  (= op 'typed-list-nth)
+                  ;; `[:map K V]` (amu ADR 0353 floor :native-hiccup-node):
+                  ;; the list's word arena with keys and values interleaved,
+                  ;; searched by a helper kotoba-native emits, so the hiccup
+                  ;; elem's `[:map :keyword :string]` attrs cross a native
+                  ;; function boundary. Entry order is not observable here:
+                  ;; `typed-map-entry-at`, `keys` and `vals` stay hosted, and
+                  ;; there is no `typed-map-equal` -- equality over a map
+                  ;; handle stays refused.
+                  (= op 'typed-map-new)
+                  (let [[type & entries] args]
+                    (and (native-aggregate-of? :map type)
+                         (even? (count entries))
+                         (every? walk entries)))
+                  (contains? (disj (set (keys native-typed-map-operation-arities)) 'typed-map-new) op)
                   (let [[type & rest] args]
-                    (and (= 3 (count args))
-                         (vector? type) (= :list (first type))
-                         (native-handle-type? type)
+                    (and (= (count args) (get native-typed-map-operation-arities op))
+                         (native-aggregate-of? :map type)
                          (every? walk rest)))
 
                   ;; `string-contains?` / `string-replace-all` are admitted for
@@ -1295,12 +1436,12 @@
                          (every? walk items)))
                   (= op 'hetero-vector-count)
                   (let [[type value] args]
-                    (and (= 2 (count args))
+                    (and (= (get native-heterogeneous-vector-operation-arities op) (count args))
                          (native-aggregate-of? :vector type)
                          (walk value)))
                   (contains? '#{hetero-vector-at hetero-vector-assoc} op)
                   (let [[type value index item] args]
-                    (and (= (if (= op 'hetero-vector-at) 3 4) (count args))
+                    (and (= (get native-heterogeneous-vector-operation-arities op) (count args))
                          (native-aggregate-of? :vector type)
                          #?(:clj (integer? index)
                             :cljs (or (i64/bigint-value? index) (integer? index)))
@@ -1308,10 +1449,13 @@
                          (walk value)
                          (or (= op 'hetero-vector-at) (walk item))))
 
-                  (and (= op 'string-contains?) (= 2 (count args)))
-                  (every? walk args)
-
-                  (and (= op 'string-replace-all) (= 3 (count args)))
+                  ;; The string heads native admits by name, with their arity
+                  ;; (native-string-operation-arities): string-contains? /
+                  ;; string-replace-all (rewritten onto the four string
+                  ;; callbacks), and the ABI v7 / v8 / v10 text, line and
+                  ;; range heads (host slots on both native ISAs).
+                  (and (contains? native-string-operation-arities op)
+                       (= (get native-string-operation-arities op) (count args)))
                   (every? walk args)
 
                   ;; `(arena-scope body)`: admitted on native exactly when its
@@ -1321,28 +1465,6 @@
                   ;; launder an operand the slice cannot emit.
                   (and (= op 'arena-scope) (= 1 (count args)))
                   (walk (first args))
-
-                  ;; ABI v7 text operations: host slots on both native ISAs.
-                  (and (= op 'string-compare) (= 2 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-fold-ascii) (= 1 (count args)))
-                  (walk (first args))
-                  (and (= op 'string-find-blank) (= 2 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-skip-blank) (= 2 (count args)))
-                  (every? walk args)
-
-                  ;; ABI v8 line operations: host slots on both native ISAs.
-                  (and (= op 'string-index-of-from) (= 3 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-compare-lines) (= 4 (count args)))
-                  (every? walk args)
-
-                  ;; ABI v10 range operations: host slots on both native ISAs.
-                  (and (= op 'string-find-byte) (= 3 (count args)))
-                  (every? walk args)
-                  (and (= op 'string-append-range) (= 4 (count args)))
-                  (every? walk args)
 
                   ;; Native `:document` is a string-shaped pair handle over
                   ;; its canonical UTF-8 EDN text. The two EDN casts are the
@@ -1376,17 +1498,9 @@
                   ;; private alternating key-handle/value vector. The five
                   ;; observable operations stay here in Kotoba machine code;
                   ;; no graph callback or context ABI slot is introduced.
-                  (= op 'string-index-new)
-                  (empty? args)
-
-                  (= op 'string-index-count)
-                  (and (= 1 (count args)) (walk (first args)))
-
-                  (contains? '#{string-index-contains string-index-get} op)
-                  (and (= 2 (count args)) (every? walk args))
-
-                  (= op 'string-index-assoc)
-                  (and (= 3 (count args)) (every? walk args))
+                  (contains? native-string-index-operation-arities op)
+                  (and (= (get native-string-index-operation-arities op) (count args))
+                       (every? walk args))
 
                   ;; `let` MUST be walked explicitly. Without this case it fell
                   ;; to `:else`, which walks `args` -- and the first arg is the
@@ -1570,7 +1684,9 @@
 ;; named traps, set per run by the embedder (`execute` :fuel :cells :bytes
 ;; :frames). Their defaults are kotoba-lang lang/limits.edn :profile/reference.
 ;;
-;;   fuel    function entries                         :budget/fuel
+;;   fuel    function entries, and one unit per       :budget/fuel
+;;           constructed cell (below) whether or not
+;;           cells are metered (amu ADR 0353 point 7)
 ;;   cells   heap nodes the run allocates: a pair,    :budget/cells
 ;;           a kgraph datom, a constructed aggregate
 ;;           (variant, record, option/result, list,
@@ -1592,13 +1708,23 @@
 ;; had (pairs, kgraph datoms, 4096 each) remain, and exhausting one is now
 ;; also `:budget/cells` (with `:arena`), not `:heap-exhausted` /
 ;; `:kgraph-exhausted`.
-(def budget-traps #{:budget/fuel :budget/cells :budget/bytes :budget/frames})
+(def budget-traps #{:budget/fuel :budget/cells :budget/bytes :budget/frames :budget/gas})
 
 (defn- charge-cells! [heap n op]
   (when-let [cells (:cells-budget heap)]
     (let [remaining (vswap! cells - n)]
       (when (neg? remaining)
         (trap! :budget/cells {:limit (:cells-limit heap) :op op})))))
+
+(defn- charge-gas!
+  "Consensus gas (`kotoba.kir.gas`): one debit per evaluated application
+  form, weighed by the run's schedule. Not metered unless the embedder named
+  `:gas` -- then it runs BESIDE fuel, never instead of it."
+  [heap op function?]
+  (when-let [gas-left (:gas-budget heap)]
+    (let [remaining (vswap! gas-left - (gas/form-weight (:gas-schedule heap) op function?))]
+      (when (neg? remaining)
+        (trap! :budget/gas {:limit (:gas-limit heap) :op op})))))
 
 (defn- charge-bytes! [heap text op]
   (when-let [bytes (:bytes-budget heap)]
@@ -1609,7 +1735,7 @@
 
 ;; The KIR heads that construct an aggregate node, each charged one cell.
 (def ^:private cell-constructor-ops
-  '#{pair kgraph-assert! map-new map-assoc option-some result-ok result-err
+  '#{pair js-capture-new kgraph-assert! map-new map-assoc option-some result-ok result-err
      result-ok-of result-err-of variant-new option-some-of option-none-of
      hetero-vector-new hetero-vector-assoc typed-list-new typed-list-conj typed-set-new
      typed-set-conj typed-set-disj typed-map-new typed-map-assoc typed-map-dissoc
@@ -3489,6 +3615,12 @@
 
 (declare eval-expr read-pair)
 
+(defn- js-capture-handle? [heap handle]
+  ;; Old embedders of eval-expr can still supply an ordinary pair-only heap.
+  (and #?(:clj (integer? handle) :cljs (= "bigint" (js-host/typeOf handle)))
+       (when-let [handles (:js-capture-handles heap)]
+         (contains? @handles handle))))
+
 (defn- validated-closure-param-indexes
   "Validate the internal representation refinement used for parameters that
   carry compiler closure handles. Their ABI type remains i64; the metadata
@@ -3561,7 +3693,10 @@
         #?(:clj (zero? chain) :cljs (i64/k-zero? chain)) nil
         (>= count 5) (trap! :invalid-closure-capture-chain
                             {:position position :max-captures 5})
-        :else (do (read-pair heap chain 0)
+        ;; An opaque cell's first slot is not an integer capture. Validate
+        ;; its arena handle via the tail without interpreting its payload.
+        :else (do (when-not (js-capture-handle? heap chain)
+                    (read-pair heap chain 0))
                   (recur (read-pair heap chain 1) (inc count)))))))
 
 (defn- validate-i64-pair-chain!
@@ -3734,10 +3869,15 @@
                      :count (count offenders)}))))
 
 (defn- trampoline-call [fname values]
-  {trampoline-tag true :function fname :values values})
+  (let [control {trampoline-tag true :function fname :values values}]
+    #?(:cljs (js-host/registerTrampoline control) :clj control)))
 
 (defn- trampoline-call? [x]
-  (and (map? x) (true? (get x trampoline-tag))))
+  ;; A :js-value result may be a Proxy, including a revoked one. Even map?
+  ;; asks it for CLJS protocol properties. Only controls we allocated may be
+  ;; inspected as maps; weak identity membership does not observe host data.
+  #?(:cljs (js-host/consumeTrampoline x)
+     :clj (and (map? x) (true? (get x trampoline-tag)))))
 
 (defn- invoke-function [function values functions fuel heap call-stack cap-call]
   (when-not function
@@ -3812,7 +3952,7 @@
     ;; heap index (`index`, interpreter-internal) becomes a kotoba value.
     #?(:clj (inc index) :cljs (i64/->bigint (inc index)))))
 
-(defn- read-pair [heap handle slot]
+(defn- read-pair-slot [heap handle slot]
   #?(:clj
      (when-not (and (integer? handle) (pos? handle)
                     (<= handle (count @(:cells heap))))
@@ -3827,6 +3967,32 @@
   ;; range, and an out-of-range handle already trapped above.
   (let [index #?(:clj (dec handle) :cljs (dec (js/Number handle)))]
     (nth (nth @(:cells heap) index) slot)))
+
+(defn- read-pair [heap handle slot]
+  ;; An opaque capture is stored, never coerced into the ordinary integer
+  ;; pair vocabulary. Its tail retains the existing physical word ABI.
+  (when (and (= slot 0) (js-capture-handle? heap handle))
+    (trap! :js-capture-projection {:operation 'pair-first}))
+  (read-pair-slot heap handle slot))
+
+(defn- allocate-js-capture! [heap value tail]
+  #?(:clj (trap! :js-value-host {:operation 'js-capture-new}) :cljs nil)
+  (when-not (:js-capture-handles heap)
+    (trap! :missing-js-capture-arena {:operation 'js-capture-new}))
+  ;; The historical i64 predicate probes .constructor. This JS boundary
+  ;; accepts only primitive bigint words, including for malformed tails.
+  (when-not #?(:clj (and (integer? tail) (<= Long/MIN_VALUE tail Long/MAX_VALUE))
+               :cljs (and (= "bigint" (js-host/typeOf tail)) (i64/in-i64-range? tail)))
+    (trap! :value-type-mismatch {:expected :i64 :operation 'js-capture-new :tail true}))
+  (let [handle (allocate-pair! heap value tail)]
+    (vswap! (:js-capture-handles heap) conj handle)
+    handle))
+
+(defn- read-js-capture [heap handle]
+  #?(:clj (trap! :js-value-host {:operation 'js-capture-value}) :cljs nil)
+  (when-not (js-capture-handle? heap handle)
+    (trap! :invalid-js-capture-cell {:operation 'js-capture-value}))
+  (read-pair-slot heap handle 0))
 
 ;; kgraph-* (ADR-2607198300): an all-integer EAVT datom store, the native
 ;; (JVM/Node/browser-free, `:x86_64-kotoba-v1`/`:aarch64-kotoba-v1`) analog of
@@ -3961,7 +4127,18 @@
                      (trap! :unbound-symbol {:symbol form}))
     :else
     (let [[op & args] form]
-      (when (contains? cell-constructor-ops op) (charge-cells! heap 1 op))
+      (charge-gas! heap op (contains? functions op))
+      ;; A constructor is charged twice over: one unit of the run's FUEL,
+      ;; always, and one cell when the embedder metered cells. The fuel debit
+      ;; is amu ADR 0353 point 7 (floor :allocation-budget): allocation comes
+      ;; out of the same 64-bit ledger execution does, so an allocation is
+      ;; bounded by the budget the caller granted even when no cells budget
+      ;; was named -- and a self-tail loop, whose re-entries are free, cannot
+      ;; build without paying. Before this a loop built any number of records
+      ;; under `:fuel 2` (measured 2026-09-30: 1,000 records, answered).
+      (when (contains? cell-constructor-ops op)
+        (charge! fuel {:operation op :allocation true})
+        (charge-cells! heap 1 op))
       (cond
         ;; `let` body and `if` branch are tail positions -- rebind and loop,
         ;; never call back into this function. See the docstring.
@@ -4063,6 +4240,19 @@
 
         (= op 'pair-first)
         (read-pair heap (eval-expr (first args) env functions fuel heap call-stack cap-call) 0)
+
+        (= op 'js-capture-new)
+        (do
+          (when-not (= 2 (count args))
+            (trap! :js-operation-arity {:operation op :expected 2 :actual (count args)}))
+          (let [[value tail] (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
+            (allocate-js-capture! heap value tail)))
+
+        (= op 'js-capture-value)
+        (do
+          (when-not (= 1 (count args))
+            (trap! :js-operation-arity {:operation op :expected 1 :actual (count args)}))
+          (read-js-capture heap (eval-expr (first args) env functions fuel heap call-stack cap-call)))
 
         (= op 'pair-second)
         (read-pair heap (eval-expr (first args) env functions fuel heap call-stack cap-call) 1)
@@ -4524,6 +4714,20 @@
                              (value/bounded-map! map-value) (partition 2 values))]
           (value/bounded-map! result))
 
+        (contains? '#{js-nullish? js-truthy? js-strict-equal? js-typeof js-array? js-bool-value js-undefined} op)
+        (let [arity (case op js-strict-equal? 2 js-undefined 0 1)]
+          (when-not (= arity (count args))
+            (trap! :js-operation-arity {:operation op :expected arity :actual (count args)}))
+          (let [values (mapv #(eval-expr % env functions fuel heap call-stack cap-call) args)]
+            (case op
+              js-nullish? (js-operations/nullish? (first values))
+              js-truthy? (js-operations/truthy? (first values))
+              js-strict-equal? (js-operations/strict-equal? (first values) (second values))
+              js-typeof (js-operations/type-of (first values))
+              js-array? (js-operations/array? (first values))
+              js-bool-value (js-operations/bool-value (first values))
+              js-undefined (js-operations/undefined-value))))
+
         (= op 'bool-not)
         (kotoba-false? (eval-expr (first args) env functions fuel heap call-stack cap-call))
 
@@ -4660,22 +4864,6 @@
                           item-forms)]
           (value/shallow-typed-value! type [type items]))
 
-        ;; The run-time-length constructor. `typed-list-new` takes its items as
-        ;; literal operands, so a list whose length is known only while the
-        ;; program runs could not be built. This appends one item at the END
-        ;; (the meaning `conj` has on a vector) and returns a NEW list; the
-        ;; carrier is bounded by `canonical-list-item-limit`.
-        (= op 'typed-list-conj)
-        (let [[type value-form item-form] args
-              list-value (value/shallow-typed-value!
-                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
-              item (value/shallow-typed-value!
-                    (second type)
-                    (eval-expr item-form env functions fuel heap call-stack cap-call))]
-          (when (>= (count (second list-value)) value/canonical-list-item-limit)
-            (trap! :list-too-large {:limit value/canonical-list-item-limit}))
-          (value/shallow-typed-value! type [type (conj (second list-value) item)]))
-
         ;; `[:list T]` had a constructor and one reader, and only one.
         ;;
         ;; Measured 2026-09-03: `(vector-count (typed-list-new [:list :i64]
@@ -4704,6 +4892,23 @@
           (when (or (neg? index) (>= index (count items)))
             (trap! :list-index-out-of-bounds {:index index :count (count items)}))
           (value/shallow-typed-value! (second type) (nth items index)))
+
+        ;; The list builder (amu ADR 0353 floor :empty-vector-field): `conj`
+        ;; onto a `[:list T]` appends at the end, as Clojure's `conj` does on
+        ;; the vector the source wrote. Bounded by the canonical list's own
+        ;; item limit, a trap past it as `typed-set-conj` traps past its own;
+        ;; one cell, charged where every constructor is.
+        (= op 'typed-list-conj)
+        (let [[type value-form item-form] args
+              list-value (value/shallow-typed-value!
+                          type (eval-expr value-form env functions fuel heap call-stack cap-call))
+              item (value/shallow-typed-value!
+                    (second type)
+                    (eval-expr item-form env functions fuel heap call-stack cap-call))
+              items (second list-value)]
+          (when (>= (count items) value/canonical-list-item-limit)
+            (trap! :list-too-large {:limit value/canonical-list-item-limit}))
+          (value/shallow-typed-value! type [type (conj (vec items) item)]))
 
         (= op 'hetero-vector-count)
         (let [[type value-form] args
@@ -5221,6 +5426,29 @@
 
         (= op 'document-null) ["null"]
 
+        ;; :bytes and :link documents (root ADR-2610092310 S1). document-link
+        ;; answers an option: bytes that are not one binary CIDv1 make no
+        ;; link, and a malformed link is neither built silently nor a trap.
+        (= op 'document-bytes)
+        (let [b (value/bounded-bytes!
+                 (eval-expr (first args) env functions fuel heap call-stack cap-call))]
+          (value/bounded-document! ["bytes" (value/bytes-items b)]))
+
+        (= op 'document-link)
+        (let [items (value/bytes-items
+                     (value/bounded-bytes!
+                      (eval-expr (first args) env functions fuel heap call-stack cap-call)))]
+          (if (value/cidv1-binary-items? items)
+            [[:option :document] true (value/bounded-document! ["link" items])]
+            [[:option :document] false]))
+
+        (contains? '#{document-bytes-value document-link-value} op)
+        (let [[tag payload] (value/bounded-document!
+                             (eval-expr (first args) env functions fuel heap call-stack cap-call))]
+          (if (= tag (if (= op 'document-bytes-value) "bytes" "link"))
+            [[:option :bytes] true (value/bytes-from-items payload)]
+            [[:option :bytes] false]))
+
         (contains? '#{document-bool document-i64 document-f64
                       document-string document-keyword document-symbol} op)
         (let [type (case op document-bool :bool document-i64 :i64 document-f64 :f64
@@ -5736,7 +5964,8 @@
   oracle whose writes are invisible is worth nothing."
   ([kir function-name args] (execute kir function-name args {}))
   ([kir function-name args {:keys [fuel cap-call typed-cap-call pair-capacity kgraph-capacity
-                                   memory frames boundary-budget cells bytes]
+                                   memory frames boundary-budget cells bytes
+                                   gas gas-schedule gas-meter]
                             :or {fuel default-fuel pair-capacity default-pair-capacity
                                  kgraph-capacity default-kgraph-capacity
                                  frames default-frames}}]
@@ -5771,6 +6000,14 @@
        (throw (ex-info (str (name k) " must be a positive integer within the admitted ceiling")
                        {:phase :ir :reason (keyword (str (name k) "-outside-admitted-range"))
                         k v :maximum max-fuel}))))
+   ;; Gas (kotoba.kir.gas) is opt-in and needs its schedule: a budget with
+   ;; no price table, or a price table with no budget, is refused rather than
+   ;; defaulted -- a defaulted schedule is a different chain's receipt.
+   (when (or gas gas-schedule)
+     (when-not (and (integer? gas) (pos? gas) (<= gas max-fuel))
+       (throw (ex-info "gas must be a positive integer within the admitted ceiling"
+                       {:phase :ir :reason :gas-outside-admitted-range :gas gas :maximum max-fuel})))
+     (gas/validate-schedule! gas-schedule))
    (when-not (and (integer? pair-capacity) (<= 0 pair-capacity default-pair-capacity))
      (throw (ex-info "pair capacity is outside runtime limits"
                      {:phase :ir :pair-capacity pair-capacity})))
@@ -5785,15 +6022,27 @@
    (let [memory-image (let [image (validated-memory memory)]
                         (cond-> image
                           image (assoc :rodata (place-rodata! image (:functions kir)))))
+         ;; Host capabilities may throw any value. Remember its identity in
+         ;; this execution only, so the outer interpreter resource classifier
+         ;; does not inspect it or rewrite a host-provided RangeError.
+         host-failure (volatile! nil)
          cap-dispatch (when (or cap-call typed-cap-call)
                         (fn
                           ([cap-id value]
                            (if cap-call
-                             (cap-call cap-id value)
+                             (try
+                               (cap-call cap-id value)
+                               (catch #?(:clj Throwable :cljs :default) e
+                                 (vreset! host-failure [e])
+                                 (throw e)))
                              (trap! :capability-denied {:capability cap-id})))
                           ([cap-id request-type result-type request]
                            (if typed-cap-call
-                             (typed-cap-call cap-id request-type result-type request)
+                             (try
+                               (typed-cap-call cap-id request-type result-type request)
+                               (catch #?(:clj Throwable :cljs :default) e
+                                 (vreset! host-failure [e])
+                                 (throw e)))
                              (trap! :capability-denied {:capability cap-id :typed true})))))
          functions (into {} (map (juxt :name identity) (:functions kir)))
          function (get functions function-name)
@@ -5846,11 +6095,17 @@
                                           args param-types)
                                     functions
                                     (volatile! fuel) {:cells (volatile! []) :capacity pair-capacity
+                                                      :js-capture-handles (volatile! #{})
                                                       :datoms (volatile! []) :kgraph-capacity kgraph-capacity
                                                       :cells-budget (when cells (volatile! cells))
                                                       :cells-limit cells
                                                       :bytes-budget (when bytes (volatile! bytes))
                                                       :bytes-limit bytes
+                                                      :gas-budget (when gas
+                                                                    (doto (or gas-meter (volatile! nil))
+                                                                      (vreset! gas)))
+                                                      :gas-limit gas
+                                                      :gas-schedule gas-schedule
                                                       :memory memory-image}
                                     [] cap-dispatch))
            ;; Box a `:bool` result at the boundary, the way every other target
@@ -5871,8 +6126,9 @@
                         (not #?(:clj (zero? value) :cljs (i64/k-zero? value)))
                         value))]
        ;; A host with a small native stack can exhaust that stack just before
-       ;; the fixed Kotoba call budget does. Host resource errors must never
-       ;; escape the language boundary: normalize this one precise failure to
+       ;; the fixed Kotoba call budget does. Interpreter resource errors must
+       ;; never escape the language boundary. Capability-provided exceptions
+       ;; retain their identity; normalize an interpreter failure to
        ;; the same deterministic, fail-closed trap.
        ;;
        ;; BOTH runtimes, and that is the fix rather than the feature. Until
@@ -5908,9 +6164,19 @@
            ;; reading the trap was told the program's budget was spent when
            ;; the host's was. The deterministic bound on call depth is
            ;; `:budget/frames`; this one is whatever the host has.
-           (if (host-stack-exhausted? e)
-             (trap! :host/stack-exhausted {:frames-limit frames})
-             (throw e))))))))
+           (let [failure @host-failure
+                 host-thrown? (and failure
+                                   (let [original (first failure)]
+                                     (or (identical? e original)
+                                         #?(:clj false
+                                            :cljs (and (number? e) (number? original)
+                                                       (not (== e e))
+                                                       (not (== original original)))))))]
+             (if host-thrown?
+               (throw e)
+               (if (host-stack-exhausted? e)
+                 (trap! :host/stack-exhausted {:frames-limit frames})
+                 (throw e))))))))))
 
 (defn oracle-inconclusive-trap
   "The resource trap that stopped an oracle run, or nil when E is anything
@@ -6131,3 +6397,15 @@
                                                           value)]
                                             [:return]]}]
                      [])))))
+
+(defn execute-metered
+  "`execute` with consensus gas (`kotoba.kir.gas`) metered: returns
+  `{:value v :gas-used n}`. `opts` must name `:gas` (the limit) and
+  `:gas-schedule`; every other option is `execute`'s. A run that exhausts its
+  gas throws the `:budget/gas` trap like any other budget -- the consensus
+  caller's rule for it (revert, charge the whole limit) is not this
+  interpreter's to apply."
+  [kir function-name args {:keys [gas] :as opts}]
+  (let [meter (volatile! nil)
+        value (execute kir function-name args (assoc opts :gas-meter meter))]
+    {:value value :gas-used (- gas @meter)}))

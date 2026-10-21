@@ -2,7 +2,9 @@
   "Native `:document` operations (gap 2 of the selfhost foundation, superproject
   adr-2609242330): admitted by the native gate exactly where kotoba-native
   lowers them (`kotoba.native.document`), with their arities, and refused by
-  name where it does not."
+  name where it does not. The :bytes / :link four (root ADR-2610092310 S4)
+  joined once kotoba-native wrote them as EDN tagged literals; their two
+  readers answer `[:option :bytes]`, admitted as an option over one word."
   (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kir :as kir]))
 
@@ -15,6 +17,7 @@
 
 (def ^:private m '(document-map :a (document-i64 1)))
 (def ^:private v '(document-vector (document-i64 1)))
+(def ^:private bs '(bytes-from-vector-i64 (vector-new 1 2)))
 
 (deftest native-admits-the-document-operations-it-lowers
   (doseq [body ['(document-null) '(document-bool true) '(document-i64 3)
@@ -36,8 +39,19 @@
                 '(document-keyword-value (document-keyword :k))
                 '(document-bool-value (document-bool true))
                 '(document-i64-value (document-i64 1))
-                (list 'document-edn-print m) '(document-edn-read "[]")]]
+                (list 'document-edn-print m) '(document-edn-read "[]")
+                ;; :bytes and :link (root ADR-2610092310 S4)
+                (list 'document-bytes bs) (list 'document-link bs)
+                (list 'option-value-of [:option :bytes]
+                      (list 'document-bytes-value (list 'document-bytes bs)) '(bytes-empty))
+                (list 'option-value-of [:option :bytes]
+                      (list 'document-link-value (list 'document-bytes bs)) '(bytes-empty))]]
     (is (true? (admitted? body)) (pr-str body))))
+
+(deftest the-bytes-and-link-operations-have-arity-one
+  (doseq [body ['(document-bytes) '(document-link) '(document-bytes-value)
+                (list 'document-link-value '(document-null) '(document-null))]]
+    (is (false? (admitted? body)) (pr-str body))))
 
 (deftest native-refuses-what-it-does-not-lower
   (testing "f64 (no f64 text), the digest and the hex codec"

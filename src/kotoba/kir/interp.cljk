@@ -20,7 +20,8 @@
   `:kir.interp/out` record whose kind is 0 value, 1 trap, 2 self-tail call, and
   whose state is the fuel left and the pair heap (the exported `run` / `eval-form`
   answer `:kir.interp/res`, the fuel left in place of the state). Fuel is charged once per function entry (a
-  loop-helper self-tail re-entry is free), depth is bounded by `frames`, and a
+  loop-helper self-tail re-entry is free) and once per evaluated constructor form
+  (the host's `cell-constructor-ops`), depth is bounded by `frames`, and a
   trap carries the host's full trap name (\"budget/fuel\", \"division-by-zero\",
   ...). Host recursion is bounded: it is at most (frames * expression depth),
   never the number of loop iterations.
@@ -367,73 +368,91 @@
   (or (string=? s "bytes-count") (string=? s "bytes-empty") (string=? s "bytes-from-vector-i64") (string=? s "bytes-literal") (string=? s "bytes-literal-length") (string=? s "bytes-slice") (string=? s "bytes-task-byte-count") (string=? s "cap-call") (string=? s "decimal-f64-parse") (string=? s "decimal-f64x3-parse") (string=? s "disjoint-set-i64-count") (string=? s "disjoint-set-i64-new") (string=? s "disjoint-set-i64-union") (string=? s "do") (string=? s "document-assoc") (string=? s "document-bool")))
 
 (defn- host-op-group-2? [s :string] :bool
-  (or (string=? s "document-bool-value") (string=? s "document-contains") (string=? s "document-count") (string=? s "document-dissoc") (string=? s "document-edn-print") (string=? s "document-edn-read") (string=? s "document-equal?") (string=? s "document-f64") (string=? s "document-f64-value") (string=? s "document-get") (string=? s "document-i64") (string=? s "document-i64-value") (string=? s "document-keyword") (string=? s "document-keyword-value") (string=? s "document-kind") (string=? s "document-list")))
+  (or (string=? s "document-bool-value") (string=? s "document-bytes") (string=? s "document-bytes-value") (string=? s "document-contains") (string=? s "document-count") (string=? s "document-dissoc") (string=? s "document-edn-print") (string=? s "document-edn-read") (string=? s "document-equal?") (string=? s "document-f64") (string=? s "document-f64-value") (string=? s "document-get") (string=? s "document-i64") (string=? s "document-i64-value") (string=? s "document-keyword") (string=? s "document-keyword-value")))
 
 (defn- host-op-group-3? [s :string] :bool
-  (or (string=? s "document-list-at") (string=? s "document-map") (string=? s "document-map-entry-at") (string=? s "document-merge") (string=? s "document-null") (string=? s "document-print") (string=? s "document-read") (string=? s "document-set") (string=? s "document-set-contains?") (string=? s "document-sha256") (string=? s "document-string") (string=? s "document-string-value") (string=? s "document-symbol") (string=? s "document-symbol-value") (string=? s "document-vector") (string=? s "document-vector-assoc")))
+  (or (string=? s "document-kind") (string=? s "document-link") (string=? s "document-link-value") (string=? s "document-list") (string=? s "document-list-at") (string=? s "document-map") (string=? s "document-map-entry-at") (string=? s "document-merge") (string=? s "document-null") (string=? s "document-print") (string=? s "document-read") (string=? s "document-set") (string=? s "document-set-contains?") (string=? s "document-sha256") (string=? s "document-string") (string=? s "document-string-value")))
 
 (defn- host-op-group-4? [s :string] :bool
-  (or (string=? s "document-vector-at") (string=? s "document-vector-conj") (string=? s "document-vector-drop") (string=? s "document-vector-remove") (string=? s "document-vector-sort") (string=? s "f32-abs") (string=? s "f32-add") (string=? s "f32-div") (string=? s "f32-eq") (string=? s "f32-from-bits") (string=? s "f32-ge") (string=? s "f32-gt") (string=? s "f32-le") (string=? s "f32-lt") (string=? s "f32-max") (string=? s "f32-min")))
+  (or (string=? s "document-symbol") (string=? s "document-symbol-value") (string=? s "document-vector") (string=? s "document-vector-assoc") (string=? s "document-vector-at") (string=? s "document-vector-conj") (string=? s "document-vector-drop") (string=? s "document-vector-remove") (string=? s "document-vector-sort") (string=? s "f32-abs") (string=? s "f32-add") (string=? s "f32-div") (string=? s "f32-eq") (string=? s "f32-from-bits") (string=? s "f32-ge") (string=? s "f32-gt")))
 
 (defn- host-op-group-5? [s :string] :bool
-  (or (string=? s "f32-mul") (string=? s "f32-neg") (string=? s "f32-sqrt") (string=? s "f32-sub") (string=? s "f32-to-bits") (string=? s "f32-to-f64-exact") (string=? s "f32-to-i64-checked") (string=? s "f32-to-i64-truncating") (string=? s "f32-unordered") (string=? s "f64-abs") (string=? s "f64-add") (string=? s "f64-atan2-bounded") (string=? s "f64-cos-bounded") (string=? s "f64-cos-quarter-turn") (string=? s "f64-div") (string=? s "f64-eq")))
+  (or (string=? s "f32-le") (string=? s "f32-lt") (string=? s "f32-max") (string=? s "f32-min") (string=? s "f32-mul") (string=? s "f32-neg") (string=? s "f32-sqrt") (string=? s "f32-sub") (string=? s "f32-to-bits") (string=? s "f32-to-f64-exact") (string=? s "f32-to-i64-checked") (string=? s "f32-to-i64-truncating") (string=? s "f32-unordered") (string=? s "f64-abs") (string=? s "f64-add") (string=? s "f64-atan2-bounded")))
 
 (defn- host-op-group-6? [s :string] :bool
-  (or (string=? s "f64-exp-bounded") (string=? s "f64-exp-near-zero") (string=? s "f64-from-bits") (string=? s "f64-ge") (string=? s "f64-gt") (string=? s "f64-le") (string=? s "f64-log-bounded") (string=? s "f64-log-near-one") (string=? s "f64-lt") (string=? s "f64-max") (string=? s "f64-min") (string=? s "f64-mul") (string=? s "f64-neg") (string=? s "f64-sin-bounded") (string=? s "f64-sin-quarter-turn") (string=? s "f64-sqrt")))
+  (or (string=? s "f64-cos-bounded") (string=? s "f64-cos-quarter-turn") (string=? s "f64-div") (string=? s "f64-eq") (string=? s "f64-exp-bounded") (string=? s "f64-exp-near-zero") (string=? s "f64-from-bits") (string=? s "f64-ge") (string=? s "f64-gt") (string=? s "f64-le") (string=? s "f64-log-bounded") (string=? s "f64-log-near-one") (string=? s "f64-lt") (string=? s "f64-max") (string=? s "f64-min") (string=? s "f64-mul")))
 
 (defn- host-op-group-7? [s :string] :bool
-  (or (string=? s "f64-sub") (string=? s "f64-to-bits") (string=? s "f64-to-f32-rounded") (string=? s "f64-to-i64-checked") (string=? s "f64-to-i64-truncating") (string=? s "f64-unordered") (string=? s "guid") (string=? s "hetero-vector-assoc") (string=? s "hetero-vector-at") (string=? s "hetero-vector-count") (string=? s "hetero-vector-equal") (string=? s "hetero-vector-new") (string=? s "i32-shift-left") (string=? s "i32-shift-right") (string=? s "i32-wrap") (string=? s "i32-wrapping-add")))
+  (or (string=? s "f64-neg") (string=? s "f64-sin-bounded") (string=? s "f64-sin-quarter-turn") (string=? s "f64-sqrt") (string=? s "f64-sub") (string=? s "f64-to-bits") (string=? s "f64-to-f32-rounded") (string=? s "f64-to-i64-checked") (string=? s "f64-to-i64-truncating") (string=? s "f64-unordered") (string=? s "guid") (string=? s "hetero-vector-assoc") (string=? s "hetero-vector-at") (string=? s "hetero-vector-count") (string=? s "hetero-vector-equal") (string=? s "hetero-vector-new")))
 
 (defn- host-op-group-8? [s :string] :bool
-  (or (string=? s "i32-wrapping-mul") (string=? s "i32-xor") (string=? s "i64-shift-left") (string=? s "i64-shift-right") (string=? s "i64-to-f32-checked") (string=? s "i64-to-f32-rounded") (string=? s "i64-to-f64-checked") (string=? s "i64-to-f64-rounded") (string=? s "if") (string=? s "kernel-atomic-add-u32") (string=? s "kernel-atomic-add-u64") (string=? s "kernel-boot-info") (string=? s "kernel-cli") (string=? s "kernel-cmpxchg-u32") (string=? s "kernel-cmpxchg-u64") (string=? s "kernel-configure-double-fault-ist")))
+  (or (string=? s "i32-shift-left") (string=? s "i32-shift-right") (string=? s "i32-wrap") (string=? s "i32-wrapping-add") (string=? s "i32-wrapping-mul") (string=? s "i32-xor") (string=? s "i64-shift-left") (string=? s "i64-shift-right") (string=? s "i64-to-f32-checked") (string=? s "i64-to-f32-rounded") (string=? s "i64-to-f64-checked") (string=? s "i64-to-f64-rounded") (string=? s "if") (string=? s "js-array?") (string=? s "js-bool-value") (string=? s "js-capture-new")))
 
 (defn- host-op-group-9? [s :string] :bool
-  (or (string=? s "kernel-configure-page-fault-recovery") (string=? s "kernel-cpuid-eax") (string=? s "kernel-cpuid-ebx") (string=? s "kernel-cpuid-ecx") (string=? s "kernel-cpuid-edx") (string=? s "kernel-dequant-dot-iq2-s") (string=? s "kernel-dequant-dot-iq3-s") (string=? s "kernel-dequant-dot-iq3-xxs") (string=? s "kernel-dequant-dot-iq4-xs") (string=? s "kernel-dequant-dot-ptq1-0") (string=? s "kernel-dequant-dot-q4-k") (string=? s "kernel-dequant-dot-q6-k") (string=? s "kernel-dequant-dot-q8-0") (string=? s "kernel-dot-f32") (string=? s "kernel-double-fault-handler-address") (string=? s "kernel-fence-full")))
+  (or (string=? s "js-capture-value") (string=? s "js-nullish?") (string=? s "js-strict-equal?") (string=? s "js-truthy?") (string=? s "js-typeof") (string=? s "js-undefined") (string=? s "kernel-atomic-add-u32") (string=? s "kernel-atomic-add-u64") (string=? s "kernel-boot-info") (string=? s "kernel-cli") (string=? s "kernel-cmpxchg-u32") (string=? s "kernel-cmpxchg-u64") (string=? s "kernel-configure-double-fault-ist") (string=? s "kernel-configure-page-fault-recovery") (string=? s "kernel-cpuid-eax") (string=? s "kernel-cpuid-ebx")))
 
 (defn- host-op-group-10? [s :string] :bool
-  (or (string=? s "kernel-fence-load") (string=? s "kernel-fence-store") (string=? s "kernel-function-address") (string=? s "kernel-hlt") (string=? s "kernel-in-u32") (string=? s "kernel-in-u8") (string=? s "kernel-invlpg") (string=? s "kernel-isr-entry-address") (string=? s "kernel-jump-to") (string=? s "kernel-load-gdt-tss") (string=? s "kernel-load-idt") (string=? s "kernel-load-ptr") (string=? s "kernel-load-u16") (string=? s "kernel-load-u16-16k") (string=? s "kernel-load-u16-4k") (string=? s "kernel-load-u16-64k")))
+  (or (string=? s "kernel-cpuid-ecx") (string=? s "kernel-cpuid-edx") (string=? s "kernel-dequant-dot-iq2-s") (string=? s "kernel-dequant-dot-iq3-s") (string=? s "kernel-dequant-dot-iq3-xxs") (string=? s "kernel-dequant-dot-iq4-xs") (string=? s "kernel-dequant-dot-ptq1-0") (string=? s "kernel-dequant-dot-q4-k") (string=? s "kernel-dequant-dot-q6-k") (string=? s "kernel-dequant-dot-q8-0") (string=? s "kernel-dot-f32") (string=? s "kernel-double-fault-handler-address") (string=? s "kernel-fence-full") (string=? s "kernel-fence-load") (string=? s "kernel-fence-store") (string=? s "kernel-function-address")))
 
 (defn- host-op-group-11? [s :string] :bool
-  (or (string=? s "kernel-load-u32") (string=? s "kernel-load-u32-16k") (string=? s "kernel-load-u32-4k") (string=? s "kernel-load-u32-64k") (string=? s "kernel-load-u64") (string=? s "kernel-load-u64-16k") (string=? s "kernel-load-u64-4k") (string=? s "kernel-load-u64-64k") (string=? s "kernel-load-u8") (string=? s "kernel-load-u8-16k") (string=? s "kernel-load-u8-4k") (string=? s "kernel-load-u8-64k") (string=? s "kernel-out-u32") (string=? s "kernel-out-u8") (string=? s "kernel-page-fault-handler-address") (string=? s "kernel-page-fault-recovery-handler-address")))
+  (or (string=? s "kernel-hlt") (string=? s "kernel-in-u32") (string=? s "kernel-in-u8") (string=? s "kernel-invlpg") (string=? s "kernel-isr-entry-address") (string=? s "kernel-jump-to") (string=? s "kernel-load-gdt-tss") (string=? s "kernel-load-idt") (string=? s "kernel-load-ptr") (string=? s "kernel-load-u16") (string=? s "kernel-load-u16-16k") (string=? s "kernel-load-u16-4k") (string=? s "kernel-load-u16-64k") (string=? s "kernel-load-u32") (string=? s "kernel-load-u32-16k") (string=? s "kernel-load-u32-4k")))
 
 (defn- host-op-group-12? [s :string] :bool
-  (or (string=? s "kernel-pause") (string=? s "kernel-probe-double-fault") (string=? s "kernel-probe-guard-write") (string=? s "kernel-probe-nx-execute") (string=? s "kernel-probe-recoverable-guard-write") (string=? s "kernel-probe-text-write") (string=? s "kernel-rdtsc") (string=? s "kernel-rdtscp") (string=? s "kernel-read-cr0") (string=? s "kernel-read-cr2") (string=? s "kernel-read-cr3") (string=? s "kernel-read-cr4") (string=? s "kernel-read-cs") (string=? s "kernel-read-msr") (string=? s "kernel-rt-timer-handler-address") (string=? s "kernel-scratch-region")))
+  (or (string=? s "kernel-load-u32-64k") (string=? s "kernel-load-u64") (string=? s "kernel-load-u64-16k") (string=? s "kernel-load-u64-4k") (string=? s "kernel-load-u64-64k") (string=? s "kernel-load-u8") (string=? s "kernel-load-u8-16k") (string=? s "kernel-load-u8-4k") (string=? s "kernel-load-u8-64k") (string=? s "kernel-out-u32") (string=? s "kernel-out-u8") (string=? s "kernel-page-fault-handler-address") (string=? s "kernel-page-fault-recovery-handler-address") (string=? s "kernel-pause") (string=? s "kernel-probe-double-fault") (string=? s "kernel-probe-guard-write")))
 
 (defn- host-op-group-13? [s :string] :bool
-  (or (string=? s "kernel-sti") (string=? s "kernel-store-u16") (string=? s "kernel-store-u16-16k") (string=? s "kernel-store-u16-4k") (string=? s "kernel-store-u16-64k") (string=? s "kernel-store-u32") (string=? s "kernel-store-u32-16k") (string=? s "kernel-store-u32-4k") (string=? s "kernel-store-u32-64k") (string=? s "kernel-store-u64") (string=? s "kernel-store-u64-16k") (string=? s "kernel-store-u64-4k") (string=? s "kernel-store-u64-64k") (string=? s "kernel-store-u8") (string=? s "kernel-store-u8-16k") (string=? s "kernel-store-u8-4k")))
+  (or (string=? s "kernel-probe-nx-execute") (string=? s "kernel-probe-recoverable-guard-write") (string=? s "kernel-probe-text-write") (string=? s "kernel-rdtsc") (string=? s "kernel-rdtscp") (string=? s "kernel-read-cr0") (string=? s "kernel-read-cr2") (string=? s "kernel-read-cr3") (string=? s "kernel-read-cr4") (string=? s "kernel-read-cs") (string=? s "kernel-read-msr") (string=? s "kernel-rt-timer-handler-address") (string=? s "kernel-scratch-region") (string=? s "kernel-sti") (string=? s "kernel-store-u16") (string=? s "kernel-store-u16-16k")))
 
 (defn- host-op-group-14? [s :string] :bool
-  (or (string=? s "kernel-store-u8-64k") (string=? s "kernel-subregion") (string=? s "kernel-swapgs") (string=? s "kernel-system-table") (string=? s "kernel-try-lock-u32") (string=? s "kernel-uefi-alloc-region") (string=? s "kernel-uefi-call2") (string=? s "kernel-uefi-call4") (string=? s "kernel-uefi-call6") (string=? s "kernel-undefined-opcode-handler-address") (string=? s "kernel-unlock-u32") (string=? s "kernel-write-cr0") (string=? s "kernel-write-cr3") (string=? s "kernel-write-cr4") (string=? s "kernel-write-msr") (string=? s "kernel-xchg-u32")))
+  (or (string=? s "kernel-store-u16-4k") (string=? s "kernel-store-u16-64k") (string=? s "kernel-store-u32") (string=? s "kernel-store-u32-16k") (string=? s "kernel-store-u32-4k") (string=? s "kernel-store-u32-64k") (string=? s "kernel-store-u64") (string=? s "kernel-store-u64-16k") (string=? s "kernel-store-u64-4k") (string=? s "kernel-store-u64-64k") (string=? s "kernel-store-u8") (string=? s "kernel-store-u8-16k") (string=? s "kernel-store-u8-4k") (string=? s "kernel-store-u8-64k") (string=? s "kernel-subregion") (string=? s "kernel-swapgs")))
 
 (defn- host-op-group-15? [s :string] :bool
-  (or (string=? s "kernel-xchg-u64") (string=? s "kernel-xgetbv") (string=? s "kernel-xsetbv") (string=? s "keyword-from-string") (string=? s "keyword-name") (string=? s "kgraph-assert!") (string=? s "kgraph-count") (string=? s "kgraph-entity-at") (string=? s "kgraph-get") (string=? s "let") (string=? s "map-assoc") (string=? s "map-get") (string=? s "map-new") (string=? s "max") (string=? s "min") (string=? s "option-match")))
+  (or (string=? s "kernel-system-table") (string=? s "kernel-try-lock-u32") (string=? s "kernel-uefi-alloc-region") (string=? s "kernel-uefi-call2") (string=? s "kernel-uefi-call4") (string=? s "kernel-uefi-call6") (string=? s "kernel-undefined-opcode-handler-address") (string=? s "kernel-unlock-u32") (string=? s "kernel-write-cr0") (string=? s "kernel-write-cr3") (string=? s "kernel-write-cr4") (string=? s "kernel-write-msr") (string=? s "kernel-xchg-u32") (string=? s "kernel-xchg-u64") (string=? s "kernel-xgetbv") (string=? s "kernel-xsetbv")))
 
 (defn- host-op-group-16? [s :string] :bool
-  (or (string=? s "option-none") (string=? s "option-none-of") (string=? s "option-some") (string=? s "option-some-of") (string=? s "option-some?") (string=? s "option-some?-of") (string=? s "option-value") (string=? s "option-value-of") (string=? s "pair") (string=? s "pair-first") (string=? s "pair-second") (string=? s "quot") (string=? s "record-assoc") (string=? s "record-equal") (string=? s "record-get") (string=? s "record-new")))
+  (or (string=? s "keyword-from-string") (string=? s "keyword-name") (string=? s "kgraph-assert!") (string=? s "kgraph-count") (string=? s "kgraph-entity-at") (string=? s "kgraph-get") (string=? s "let") (string=? s "map-assoc") (string=? s "map-get") (string=? s "map-new") (string=? s "max") (string=? s "min") (string=? s "option-match") (string=? s "option-none") (string=? s "option-none-of") (string=? s "option-some")))
 
 (defn- host-op-group-17? [s :string] :bool
-  (or (string=? s "result-err") (string=? s "result-err-of") (string=? s "result-error") (string=? s "result-error-of") (string=? s "result-match-of") (string=? s "result-ok") (string=? s "result-ok-of") (string=? s "result-ok?") (string=? s "result-ok?-of") (string=? s "result-value") (string=? s "result-value-of") (string=? s "slice-load-u16") (string=? s "slice-load-u32") (string=? s "slice-load-u64") (string=? s "slice-load-u8") (string=? s "slice-store-u16")))
+  (or (string=? s "option-some-of") (string=? s "option-some?") (string=? s "option-some?-of") (string=? s "option-value") (string=? s "option-value-of") (string=? s "pair") (string=? s "pair-first") (string=? s "pair-second") (string=? s "quot") (string=? s "record-assoc") (string=? s "record-equal") (string=? s "record-get") (string=? s "record-new") (string=? s "result-err") (string=? s "result-err-of") (string=? s "result-error")))
 
 (defn- host-op-group-18? [s :string] :bool
-  (or (string=? s "slice-store-u32") (string=? s "slice-store-u64") (string=? s "slice-store-u8") (string=? s "string-append-range") (string=? s "string-byte-length") (string=? s "string-code-point-at") (string=? s "string-compare") (string=? s "string-compare-lines") (string=? s "string-concat") (string=? s "string-contains?") (string=? s "string-find-blank") (string=? s "string-find-byte") (string=? s "string-fold-ascii") (string=? s "string-fold-case") (string=? s "string-from-i64") (string=? s "string-from-utf8")))
+  (or (string=? s "result-error-of") (string=? s "result-match-of") (string=? s "result-ok") (string=? s "result-ok-of") (string=? s "result-ok?") (string=? s "result-ok?-of") (string=? s "result-value") (string=? s "result-value-of") (string=? s "slice-load-u16") (string=? s "slice-load-u32") (string=? s "slice-load-u64") (string=? s "slice-load-u8") (string=? s "slice-store-u16") (string=? s "slice-store-u32") (string=? s "slice-store-u64") (string=? s "slice-store-u8")))
 
 (defn- host-op-group-19? [s :string] :bool
-  (or (string=? s "string-index-assoc") (string=? s "string-index-contains") (string=? s "string-index-count") (string=? s "string-index-get") (string=? s "string-index-new") (string=? s "string-index-of") (string=? s "string-index-of-from") (string=? s "string-length") (string=? s "string-replace-all") (string=? s "string-skip-blank") (string=? s "string-split-count") (string=? s "string-substring") (string=? s "string-upper") (string=? s "string=?") (string=? s "symbol") (string=? s "task-ready?")))
+  (or (string=? s "string-append-range") (string=? s "string-byte-length") (string=? s "string-code-point-at") (string=? s "string-compare") (string=? s "string-compare-lines") (string=? s "string-concat") (string=? s "string-contains?") (string=? s "string-find-blank") (string=? s "string-find-byte") (string=? s "string-fold-ascii") (string=? s "string-fold-case") (string=? s "string-from-i64") (string=? s "string-from-utf8") (string=? s "string-index-assoc") (string=? s "string-index-contains") (string=? s "string-index-count")))
 
 (defn- host-op-group-20? [s :string] :bool
-  (or (string=? s "typed-cap-call") (string=? s "typed-list-conj") (string=? s "typed-list-new") (string=? s "typed-list-nth") (string=? s "typed-map-assoc") (string=? s "typed-map-contains") (string=? s "typed-map-count") (string=? s "typed-map-dissoc") (string=? s "typed-map-entry-at") (string=? s "typed-map-equal") (string=? s "typed-map-get") (string=? s "typed-map-keys") (string=? s "typed-map-new") (string=? s "typed-map-vals") (string=? s "typed-set-conj") (string=? s "typed-set-contains")))
+  (or (string=? s "string-index-get") (string=? s "string-index-new") (string=? s "string-index-of") (string=? s "string-index-of-from") (string=? s "string-length") (string=? s "string-replace-all") (string=? s "string-skip-blank") (string=? s "string-split-count") (string=? s "string-substring") (string=? s "string-upper") (string=? s "string=?") (string=? s "symbol") (string=? s "task-ready?") (string=? s "typed-cap-call") (string=? s "typed-list-conj") (string=? s "typed-list-new")))
 
 (defn- host-op-group-21? [s :string] :bool
-  (or (string=? s "typed-set-count") (string=? s "typed-set-disj") (string=? s "typed-set-equal") (string=? s "typed-set-new") (string=? s "typed-set-nth") (string=? s "u32-shift-right") (string=? s "u32-wrap") (string=? s "u64-shift-right") (string=? s "ucs2") (string=? s "variant-match") (string=? s "variant-new") (string=? s "vector-alloc") (string=? s "vector-assoc") (string=? s "vector-assoc!") (string=? s "vector-at") (string=? s "vector-conj")))
+  (or (string=? s "typed-list-nth") (string=? s "typed-map-assoc") (string=? s "typed-map-contains") (string=? s "typed-map-count") (string=? s "typed-map-dissoc") (string=? s "typed-map-entry-at") (string=? s "typed-map-equal") (string=? s "typed-map-get") (string=? s "typed-map-keys") (string=? s "typed-map-new") (string=? s "typed-map-vals") (string=? s "typed-set-conj") (string=? s "typed-set-contains") (string=? s "typed-set-count") (string=? s "typed-set-disj") (string=? s "typed-set-equal")))
 
 (defn- host-op-group-22? [s :string] :bool
-  (or (string=? s "vector-count") (string=? s "vector-drop") (string=? s "vector-f64-assoc") (string=? s "vector-f64-at") (string=? s "vector-f64-conj") (string=? s "vector-f64-count") (string=? s "vector-f64-drop") (string=? s "vector-f64-get") (string=? s "vector-f64-new") (string=? s "vector-f64-take") (string=? s "vector-get") (string=? s "vector-i64-from-bytes") (string=? s "vector-new") (string=? s "vector-take") (string=? s "xml-name-count") (string=? s "xml-name-text")))
+  (or (string=? s "typed-set-new") (string=? s "typed-set-nth") (string=? s "u32-shift-right") (string=? s "u32-wrap") (string=? s "u64-shift-right") (string=? s "ucs2") (string=? s "variant-match") (string=? s "variant-new") (string=? s "vector-alloc") (string=? s "vector-assoc") (string=? s "vector-assoc!") (string=? s "vector-at") (string=? s "vector-conj") (string=? s "vector-count") (string=? s "vector-drop") (string=? s "vector-f64-assoc")))
 
 (defn- host-op-group-23? [s :string] :bool
-  (or (string=? s "xml-path-attr") (string=? s "xml-path-count") (string=? s "xml-path-text") (string=? s "xorshift32")))
+  (or (string=? s "vector-f64-at") (string=? s "vector-f64-conj") (string=? s "vector-f64-count") (string=? s "vector-f64-drop") (string=? s "vector-f64-get") (string=? s "vector-f64-new") (string=? s "vector-f64-take") (string=? s "vector-get") (string=? s "vector-i64-from-bytes") (string=? s "vector-new") (string=? s "vector-take") (string=? s "xml-name-count") (string=? s "xml-name-text") (string=? s "xml-path-attr") (string=? s "xml-path-count") (string=? s "xml-path-text")))
+
+(defn- host-op-group-24? [s :string] :bool
+  (or (string=? s "xorshift32")))
 
 (defn host-op-name? [s :string] :bool
-  (or (host-op-group-0? s) (host-op-group-1? s) (host-op-group-2? s) (host-op-group-3? s) (host-op-group-4? s) (host-op-group-5? s) (host-op-group-6? s) (host-op-group-7? s) (host-op-group-8? s) (host-op-group-9? s) (host-op-group-10? s) (host-op-group-11? s) (host-op-group-12? s) (host-op-group-13? s) (host-op-group-14? s) (host-op-group-15? s) (host-op-group-16? s) (host-op-group-17? s) (host-op-group-18? s) (host-op-group-19? s) (host-op-group-20? s) (host-op-group-21? s) (host-op-group-22? s) (host-op-group-23? s)))
+  (or (host-op-group-0? s) (host-op-group-1? s) (host-op-group-2? s) (host-op-group-3? s) (host-op-group-4? s) (host-op-group-5? s) (host-op-group-6? s) (host-op-group-7? s) (host-op-group-8? s) (host-op-group-9? s) (host-op-group-10? s) (host-op-group-11? s) (host-op-group-12? s) (host-op-group-13? s) (host-op-group-14? s) (host-op-group-15? s) (host-op-group-16? s) (host-op-group-17? s) (host-op-group-18? s) (host-op-group-19? s) (host-op-group-20? s) (host-op-group-21? s) (host-op-group-22? s) (host-op-group-23? s) (host-op-group-24? s)))
+
+(defn- constructor-op-group-0? [s :string] :bool
+  (or (string=? s "bytes-concat") (string=? s "bytes-from-vector-i64") (string=? s "bytes-slice") (string=? s "disjoint-set-i64-new") (string=? s "disjoint-set-i64-union") (string=? s "document-list") (string=? s "document-map") (string=? s "document-set") (string=? s "document-vector") (string=? s "hetero-vector-assoc") (string=? s "hetero-vector-new") (string=? s "js-capture-new") (string=? s "kgraph-assert!") (string=? s "map-assoc") (string=? s "map-new") (string=? s "option-none-of")))
+
+(defn- constructor-op-group-1? [s :string] :bool
+  (or (string=? s "option-some") (string=? s "option-some-of") (string=? s "pair") (string=? s "record-assoc") (string=? s "record-new") (string=? s "result-err") (string=? s "result-err-of") (string=? s "result-ok") (string=? s "result-ok-of") (string=? s "string-index-assoc") (string=? s "string-index-new") (string=? s "typed-list-conj") (string=? s "typed-list-new") (string=? s "typed-map-assoc") (string=? s "typed-map-dissoc") (string=? s "typed-map-new")))
+
+(defn- constructor-op-group-2? [s :string] :bool
+  (or (string=? s "typed-set-conj") (string=? s "typed-set-disj") (string=? s "typed-set-new") (string=? s "variant-new") (string=? s "vector-alloc") (string=? s "vector-assoc") (string=? s "vector-assoc!") (string=? s "vector-conj") (string=? s "vector-drop") (string=? s "vector-f64-assoc") (string=? s "vector-f64-conj") (string=? s "vector-f64-drop") (string=? s "vector-f64-new") (string=? s "vector-f64-take") (string=? s "vector-i64-from-bytes") (string=? s "vector-new")))
+
+(defn- constructor-op-group-3? [s :string] :bool
+  (or (string=? s "vector-take")))
+
+(defn- constructor-op-name? [s :string] :bool
+  (or (constructor-op-group-0? s) (constructor-op-group-1? s) (constructor-op-group-2? s) (constructor-op-group-3? s)))
 ;; END GENERATED
 
 ;; ---- function table ----
@@ -2128,8 +2147,17 @@
   (let [head (form/first-of form)]
     (if (not (form/is-symbol? head))
       (r-trap fuel "unknown-function")
-      (let [name (form/symbol-value head)
-            op (op-code name)]
+      (let [name (form/symbol-value head)]
+        ;; A constructor (the host's `cell-constructor-ops`, generated as
+        ;; `constructor-op-name?`) debits one unit of fuel before its operands
+        ;; are evaluated, as the host's `eval-expr` does (amu ADR 0353 point 7).
+        (if (constructor-op-name? name)
+          (if (< (- (st-fuel fuel) 1) 0)
+            (r-trap (st-charge fuel) "budget/fuel")
+            (ev-head name (op-code name) form env cx (st-charge fuel)))
+          (ev-head name (op-code name) form env cx fuel))))))
+
+(defn- ev-head [name :string op :i64 form [:ref :form/r] env [:list [:ref :kir/v]] cx [:ref :kir.interp/cx] fuel [:ref :kir.interp/st]] [:ref :kir.interp/out]
         (cond
           (= op 29) (ev-let-from (form/nth-of form 1) 0 env (form/nth-of form 2) cx fuel)
           (= op 30)
@@ -2145,7 +2173,7 @@
           (>= op 100) (ev-bytes-call op form env cx fuel)
           (>= op 60) (ev-agg op form env cx fuel)
           (> op 0) (ev-builtin op form env cx fuel)
-          :else (ev-call name form env cx fuel))))))
+          :else (ev-call name form env cx fuel)))
 
 (defn- ev-symbol [form [:ref :form/r] env [:list [:ref :kir/v]] fuel [:ref :kir.interp/st]] [:ref :kir.interp/out]
   (let [at (env-index env (form/symbol-value form))]

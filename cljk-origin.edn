@@ -69,6 +69,7 @@
   "test/kotoba/kir_typed_set_nth_test.cljk" ".clj"
   "test/kotoba/kir_uefi_boundary_test.cljk" ".cljc"
   "test/kotoba/kir_uleb_i64_test.cljk" ".cljc"
+  "test/kotoba/kir_value_js_test.cljk" ".cljc"
   "test/kotoba/kir_value_bytes_test.cljk" ".clj"
   "test/kotoba/kir_value_chunk_queue_test.cljk" ".clj"
   "test/kotoba/kir_value_codec_differential_test.cljk" ".clj"
