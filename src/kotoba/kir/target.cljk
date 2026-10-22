@@ -175,15 +175,15 @@
 (defn profile [target] (get profiles target)))
 
 #?(:kotoba
-   (defn backend [target :keyword] :document
+   (defn backend [target :keyword] [:option :keyword]
      (let [isa (dgk (profile target) :isa)]
-       (cond (document-equal? isa (document-keyword :wasm32)) (document-keyword :wasm32-kotoba-v1)
-             (document-equal? isa (document-keyword :x86_64)) (document-keyword :x86_64-kotoba-v1)
-             (document-equal? isa (document-keyword :aarch64)) (document-keyword :aarch64-kotoba-v1)
-             (document-equal? isa (document-keyword :cljs)) (document-keyword :cljs-kotoba-v1)
-             (document-equal? isa (document-keyword :javascript)) (document-keyword :js-kotoba-v1)
-             (document-equal? isa (document-keyword :evm256)) (document-keyword :evm256-kotoba-v1)
-             :else (document-null))))
+       (cond (document-equal? isa (document-keyword :wasm32)) (option-some-of [:option :keyword] :wasm32-kotoba-v1)
+             (document-equal? isa (document-keyword :x86_64)) (option-some-of [:option :keyword] :x86_64-kotoba-v1)
+             (document-equal? isa (document-keyword :aarch64)) (option-some-of [:option :keyword] :aarch64-kotoba-v1)
+             (document-equal? isa (document-keyword :cljs)) (option-some-of [:option :keyword] :cljs-kotoba-v1)
+             (document-equal? isa (document-keyword :javascript)) (option-some-of [:option :keyword] :js-kotoba-v1)
+             (document-equal? isa (document-keyword :evm256)) (option-some-of [:option :keyword] :evm256-kotoba-v1)
+             :else (option-none-of [:option :keyword]))))
    :default
 (defn backend [target]
   (case (:isa (profile target))
