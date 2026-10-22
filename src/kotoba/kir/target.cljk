@@ -1,6 +1,46 @@
 (ns kotoba.kir.target
   {:kotoba/export [backend compatibility-targets profile profiles]})
 
+;; R6QW3: the Kotoba reading (W3: the scan refused this module E2124 at the profiles
+;; map -- a map literal of constant data is opaque and its references are refused).
+;; The profiles map is built with typed-map-new over :document values (the entries
+;; carry mixed keyword/string/bool values); the exported constants are 0-argument
+;; functions in the Kotoba reading (the export surface names functions only).
+#?(:kotoba
+   (defn- dgk [d :document k :keyword] :document
+     (option-value-of [:option :document] (document-get d k) (document-null))))
+
+#?(:kotoba
+   (defn profiles [] [:map :keyword :document]
+     (typed-map-new [:map :keyword :document]
+                    :wasm32-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :wasm) (document-keyword :isa) (document-keyword :wasm32) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :wasm-mvp) (document-keyword :runtime) (document-keyword :kototama-capability-host-v1))
+                    :wasm32-browser-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :wasm) (document-keyword :isa) (document-keyword :wasm32) (document-keyword :os) (document-keyword :browser) (document-keyword :abi) (document-keyword :wasm-mvp) (document-keyword :runtime) (document-keyword :kototama-browser-host-v1))
+                    :wasm32-wasi-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :wasm) (document-keyword :isa) (document-keyword :wasm32) (document-keyword :os) (document-keyword :wasi) (document-keyword :abi) (document-keyword :wasm-mvp) (document-keyword :runtime) (document-keyword :kototama-wasi-host-v1))
+                    :wasm-component-kotoba-v2 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :component) (document-keyword :isa) (document-keyword :wasm32) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :component-canonical-abi-v2) (document-keyword :runtime) (document-keyword :kototama-component-runtime-v2) (document-keyword :wasi-version) (document-string "0.3.0") (document-keyword :ambient-wasi) (document-bool false))
+                    :x86_64-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :sysv) (document-keyword :runtime) (document-keyword :kototama-supervisor-v1))
+                    :x86_64-linux-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :linux) (document-keyword :abi) (document-keyword :sysv) (document-keyword :runtime) (document-keyword :kototama-linux-supervisor-v1))
+                    :x86_64-macos-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :macos) (document-keyword :abi) (document-keyword :sysv) (document-keyword :runtime) (document-keyword :kototama-macos-supervisor-v1))
+                    :x86_64-windows-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :windows) (document-keyword :abi) (document-keyword :kotoba-sysv-v1) (document-keyword :runtime) (document-keyword :kototama-windows-supervisor-v1))
+                    :x86_64-aiueos-uefi-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :firmware) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :aiueos) (document-keyword :abi) (document-keyword :microsoft-x64) (document-keyword :runtime) (document-keyword :none) (document-keyword :artifact) (document-keyword :pe32+) (document-keyword :subsystem) (document-keyword :efi-application) (document-keyword :entry) (document-keyword :efi_main) (document-keyword :entry-contract) (document-keyword :microsoft-x64-two-arity-efi-status-v2) (document-keyword :entry-contracts) (document-i64 0) (document-keyword :microsoft-x64-zero-arity-efi-status-v1) (document-i64 2) (document-keyword :microsoft-x64-two-arity-efi-status-v2) (document-keyword :internal-abi) (document-keyword :kotoba-sysv-context-r9-v2) (document-keyword :ambient-syscalls))
+                    :x86_64-aiueos-kernel-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :kernel) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :aiueos) (document-keyword :abi) (document-keyword :aiueos-kernel-v1) (document-keyword :runtime) (document-keyword :none) (document-keyword :artifact) (document-keyword :elf64) (document-keyword :link-artifact) (document-keyword :elf64-relocatable) (document-keyword :entry) (document-keyword :aiueos_kernel_entry) (document-keyword :ambient-syscalls) (document-bool false) (document-keyword :host-imports) (document-bool false) (document-keyword :dynamic-linker) (document-bool false))
+                    :x86_64-aiueos-user-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :process) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :aiueos) (document-keyword :abi) (document-keyword :aiueos-user-v1) (document-keyword :runtime) (document-keyword :kototama-aiueos-user-v1) (document-keyword :artifact) (document-keyword :elf64) (document-keyword :entry) (document-keyword :aiueos_process_entry) (document-keyword :entry-contract) (document-keyword :kotoba-sysv-context-r9-aiueos-runtime-v2) (document-keyword :ambient-syscalls) (document-bool false) (document-keyword :host-imports) (document-bool false) (document-keyword :dynamic-linker) (document-bool false))
+                    :aarch64-aiueos-kernel-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :kernel) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :aiueos) (document-keyword :abi) (document-keyword :aiueos-kernel-v1) (document-keyword :runtime) (document-keyword :none) (document-keyword :artifact) (document-keyword :elf64) (document-keyword :link-artifact) (document-keyword :elf64-relocatable) (document-keyword :entry) (document-keyword :aiueos_kernel_entry) (document-keyword :ambient-syscalls) (document-bool false) (document-keyword :host-imports) (document-bool false) (document-keyword :dynamic-linker) (document-bool false))
+                    :x86_64-linux-static-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :x86_64) (document-keyword :os) (document-keyword :linux) (document-keyword :abi) (document-keyword :sysv) (document-keyword :runtime) (document-keyword :kotoba-linux-static-prelude-v1) (document-keyword :artifact) (document-keyword :elf64) (document-keyword :linkage) (document-keyword :static) (document-keyword :entry-contract) (document-keyword :kotoba-linux-static-start-v1) (document-keyword :ambient-syscalls) (document-bool false) (document-keyword :host-imports) (document-bool false) (document-keyword :dynamic-linker) (document-bool false))
+                    :aarch64-linux-static-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :linux) (document-keyword :abi) (document-keyword :aapcs64) (document-keyword :runtime) (document-keyword :kotoba-linux-static-prelude-v1) (document-keyword :artifact) (document-keyword :elf64) (document-keyword :linkage) (document-keyword :static) (document-keyword :entry-contract) (document-keyword :kotoba-linux-static-start-v1) (document-keyword :ambient-syscalls) (document-bool false) (document-keyword :host-imports) (document-bool false) (document-keyword :dynamic-linker) (document-bool false))
+                    :aarch64-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :aapcs64) (document-keyword :runtime) (document-keyword :kototama-supervisor-v1))
+                    :aarch64-linux-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :linux) (document-keyword :abi) (document-keyword :aapcs64) (document-keyword :runtime) (document-keyword :kototama-linux-supervisor-v1))
+                    :aarch64-macos-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :macos) (document-keyword :abi) (document-keyword :aapcs64) (document-keyword :runtime) (document-keyword :kototama-macos-supervisor-v1))
+                    :aarch64-windows-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :windows) (document-keyword :abi) (document-keyword :kotoba-aapcs64-v1) (document-keyword :runtime) (document-keyword :kototama-windows-supervisor-v1))
+                    :aarch64-android-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :android) (document-keyword :abi) (document-keyword :aapcs64) (document-keyword :runtime) (document-keyword :kototama-android-isolated-host-v1))
+                    :aarch64-ios-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :native) (document-keyword :isa) (document-keyword :aarch64) (document-keyword :os) (document-keyword :ios) (document-keyword :abi) (document-keyword :aapcs64) (document-keyword :runtime) (document-keyword :kototama-ios-static-host-v1))
+                    :cljs-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :cljs) (document-keyword :isa) (document-keyword :cljs) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :cljs-source-v1) (document-keyword :runtime) (document-keyword :kototama-cljs-host-v1))
+                    :cljs-node-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :cljs) (document-keyword :isa) (document-keyword :cljs) (document-keyword :os) (document-keyword :node) (document-keyword :abi) (document-keyword :cljs-source-v1) (document-keyword :runtime) (document-keyword :kototama-cljs-node-host-v1))
+                    :cljs-browser-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :cljs) (document-keyword :isa) (document-keyword :cljs) (document-keyword :os) (document-keyword :browser) (document-keyword :abi) (document-keyword :cljs-source-v1) (document-keyword :runtime) (document-keyword :kototama-cljs-browser-host-v1))
+                    :js-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :javascript) (document-keyword :isa) (document-keyword :javascript) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :kotoba-restricted-esm-v1) (document-keyword :runtime) (document-keyword :kototama-js-host-v1))
+                    :js-browser-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :javascript) (document-keyword :isa) (document-keyword :javascript) (document-keyword :os) (document-keyword :browser) (document-keyword :abi) (document-keyword :kotoba-restricted-esm-v1) (document-keyword :runtime) (document-keyword :kototama-worker-host-v1))
+                    :evm256-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :evm) (document-keyword :isa) (document-keyword :evm256) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :ethereum-contract-abi-v1) (document-keyword :runtime) (document-keyword :kototama-evm-host-v1) (document-keyword :evm-revision) (document-keyword :shanghai) (document-keyword :ambient-precompiles) (document-bool false))
+                    :wasm-component-kotoba-v1 (document-map (document-keyword :format) (document-keyword :kotoba.target-profile/v1) (document-keyword :execution) (document-keyword :component) (document-keyword :isa) (document-keyword :wasm32) (document-keyword :os) (document-keyword :unspecified) (document-keyword :abi) (document-keyword :canonical-abi-v1) (document-keyword :runtime) (document-keyword :kototama-component-host-v1) (document-keyword :wasi-version) (document-string "0.3.0") (document-keyword :ambient-wasi) (document-bool false))))
+   :default
 (def profiles
   {:wasm32-kotoba-v1 {:format :kotoba.target-profile/v1 :execution :wasm :isa :wasm32 :os :unspecified :abi :wasm-mvp :runtime :kototama-capability-host-v1}
    :wasm32-browser-kotoba-v1 {:format :kotoba.target-profile/v1 :execution :wasm :isa :wasm32 :os :browser :abi :wasm-mvp :runtime :kototama-browser-host-v1}
@@ -112,13 +152,39 @@
    :wasm-component-kotoba-v1 {:format :kotoba.target-profile/v1 :execution :component
                               :isa :wasm32 :os :unspecified :abi :canonical-abi-v1
                               :runtime :kototama-component-host-v1
-                              :wasi-version "0.3.0" :ambient-wasi false}})
+                              :wasi-version "0.3.0" :ambient-wasi false}}))
+
+
 
 ;; Backends in this set participate in the whole-language parity matrix.
 ;; Bounded targets remain real profiles and source-compilable targets, but do
 ;; not enter this set until they implement that full surface.
-(def compatibility-targets #{:wasm32-kotoba-v1 :x86_64-kotoba-v1 :aarch64-kotoba-v1 :cljs-kotoba-v1 :js-kotoba-v1})
-(defn profile [target] (get profiles target))
+#?(:kotoba
+   (defn compatibility-targets [] [:set :keyword]
+     (typed-set-new [:set :keyword] :wasm32-kotoba-v1 :x86_64-kotoba-v1 :aarch64-kotoba-v1 :cljs-kotoba-v1 :js-kotoba-v1))
+   :default
+(def compatibility-targets #{:wasm32-kotoba-v1 :x86_64-kotoba-v1 :aarch64-kotoba-v1 :cljs-kotoba-v1 :js-kotoba-v1}))
+
+
+#?(:kotoba
+   (defn profile [target :keyword] :document
+     (option-value-of [:option :document]
+                      (typed-map-get [:map :keyword :document] (profiles) target)
+                      (document-null)))
+   :default
+(defn profile [target] (get profiles target)))
+
+#?(:kotoba
+   (defn backend [target :keyword] :document
+     (let [isa (dgk (profile target) :isa)]
+       (cond (document-equal? isa (document-keyword :wasm32)) (document-keyword :wasm32-kotoba-v1)
+             (document-equal? isa (document-keyword :x86_64)) (document-keyword :x86_64-kotoba-v1)
+             (document-equal? isa (document-keyword :aarch64)) (document-keyword :aarch64-kotoba-v1)
+             (document-equal? isa (document-keyword :cljs)) (document-keyword :cljs-kotoba-v1)
+             (document-equal? isa (document-keyword :javascript)) (document-keyword :js-kotoba-v1)
+             (document-equal? isa (document-keyword :evm256)) (document-keyword :evm256-kotoba-v1)
+             :else (document-null))))
+   :default
 (defn backend [target]
   (case (:isa (profile target))
     :wasm32 :wasm32-kotoba-v1
@@ -127,4 +193,4 @@
     :cljs :cljs-kotoba-v1
     :javascript :js-kotoba-v1
     :evm256 :evm256-kotoba-v1
-    nil))
+    nil)))
