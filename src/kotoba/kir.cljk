@@ -394,6 +394,10 @@
 (def ^:private max-native-aggregate-members 32)
 (def ^:private max-native-aggregate-depth 32)
 
+(def ^:private native-aggregate-member-handle-types
+  "Context-owned handle types an aggregate may hold as a member."
+  #{:bytes :vector-i64})
+
 (declare native-handle-type?)
 
 (def ^:private native-map-key-types
@@ -421,7 +425,13 @@
    (and (<= depth max-native-aggregate-depth)
         (or (native-word-value-type? type)
             (native-scalar-record-type? type)
-            (= :vector-i64 type)
+            ;; A context-owned vector-arena handle (`:bytes`, `:vector-i64`) is
+            ;; one word like a pair handle, so a record field or a list item
+            ;; may hold one. The handle lives in the call context's arena for
+            ;; the same extent as the pair cells that point at it. It still
+            ;; cannot cross an EXPORT inside an aggregate: the loader codec
+            ;; builds only top-level handles (`native-export-codec-types`).
+            (contains? native-aggregate-member-handle-types type)
             (and (vector? type) (seq type)
                  (case (first type)
                    :ref (and (= 2 (count type)) (keyword? (second type))
@@ -442,6 +452,9 @@
                    ;; document-bytes-value / document-link-value answer. A
                    ;; `:bytes` is one vector-arena word, the option a pair
                    ;; over it. Only the option is widened, not `:bytes` itself.
+                   ;; (`:bytes` is also an aggregate member through
+                   ;; `native-aggregate-member-handle-types`, so this arm is a
+                   ;; no-op superset kept for the option's own reading.)
                    :option (and (= 2 (count type))
                                 (or (= :bytes (second type))
                                     (native-handle-type? (second type) (inc depth) seen)))
@@ -519,8 +532,16 @@
    [[:revision :i64] [:target :keyword] [:kind :keyword] [:value :string]]])
 (def ^:private native-ui-event-result-type [:option native-ui-event-type])
 
-(defn- native-provider-contract? [cap-id request-type result-type]
-  (or (and (= 7 cap-id)
+(defn- host-cap-id
+  "A capability id as a host number. nbb reads a KIR i64 literal as a BigInt, and
+  `(= 35 35n)` is false there, so every equality on an id goes through this."
+  [cap-id]
+  #?(:clj cap-id
+     :cljs (if (i64/bigint-value? cap-id) (js/Number cap-id) cap-id)))
+
+(defn- native-provider-contract? [raw-cap-id request-type result-type]
+  (let [cap-id (host-cap-id raw-cap-id)]
+   (or (and (= 7 cap-id)
            (= native-clock-request-type request-type)
            (= native-clock-result-type result-type))
       (and (= 24 cap-id)
@@ -531,7 +552,7 @@
            (= native-ui-commit-result-type result-type))
       (and (= 10 cap-id)
            (= native-ui-event-request-type request-type)
-           (= native-ui-event-result-type result-type))))
+           (= native-ui-event-result-type result-type)))))
 
 (defn- native-word-value-type?
   "Types whose runtime value fits the native backend's uniform 64-bit word.
@@ -553,6 +574,11 @@
                    :set (and (= 2 (count type))
                              (or (native-word-value-type? (second type) (inc depth))
                                  (native-scalar-record-type? (second type))))
+                   ;; `[:list T]` is the same word arena as `[:set T]`: a
+                   ;; vector-arena handle whose items are words.
+                   :list (and (= 2 (count type))
+                              (or (native-word-value-type? (second type) (inc depth))
+                                  (native-scalar-record-type? (second type))))
                    :result (and (= 3 (count type))
                                 (native-word-value-type? (second type) (inc depth))
                                 (native-word-value-type? (nth type 2) (inc depth)))
@@ -1053,7 +1079,14 @@
                                           [:option-i64 :option-i64]
                                           [:result-i64 :result-i64]}
                                         [request-type result-type])
-                             (native-provider-contract? cap-id request-type result-type))
+                             (native-provider-contract? cap-id request-type result-type)
+                             ;; fs/app-data-bytes (wire 35): the :bytes payload
+                             ;; of the file wire. Bytes are one-word vector-arena
+                             ;; handles; the loader bridges them to the file
+                             ;; providers (kexe_loader.c, typed kinds 8 and 9).
+                             (and (= 35 (host-cap-id cap-id))
+                                  (contains? #{[:string :bytes] [:bytes :bytes]}
+                                             [request-type result-type])))
                          (walk request)))
                   ;; f64 scalar arithmetic on native (ADR-2608030300). Same
                   ;; reasoning as `i32-operations` above: no new value
@@ -1444,6 +1477,15 @@
                   ;; Not admitted: document-f64 / document-f64-value (native
                   ;; has no f64 text), document-sha256, document-print /
                   ;; document-read (canonical bytes as hex).
+                  ;; `(document-symbol (symbol text))`: the one position where
+                  ;; native admits the `symbol` operation. A symbol is the text
+                  ;; of its name (kotoba-native drops the wrapper and the
+                  ;; document helper validates the name), so the operand is the
+                  ;; text expression itself.
+                  (and (= op 'document-symbol) (= 1 (count args))
+                       (seq? (first args)) (= 'symbol (first (first args)))
+                       (= 2 (count (first args))))
+                  (walk (second (first args)))
                   (contains? native-document-operation-arities op)
                   (let [arity (get native-document-operation-arities op)]
                     (and (cond (= :even arity) (even? (count args))
