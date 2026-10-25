@@ -535,33 +535,33 @@
    (defn kmask-iq2xs [] [:list :i64]
      (hex->bytes (kmask-iq2xs-hex)))
    :default
-(def kmask-iq2xs (hex->bytes (kmask-iq2xs-hex))))
+(def kmask-iq2xs (hex->bytes kmask-iq2xs-hex)))
 #?(:kotoba
    (defn ksigns-iq2xs [] [:list :i64]
      (hex->bytes (ksigns-iq2xs-hex)))
    :default
-(def ksigns-iq2xs (hex->bytes (ksigns-iq2xs-hex))))
+(def ksigns-iq2xs (hex->bytes ksigns-iq2xs-hex)))
 #?(:kotoba
    (def kvalues-iq4nl (signed-hex (kvalues-iq4nl-hex)))
    :default
 (def kvalues-iq4nl
   ;; SIGNED: the C declares `int8_t`, and -127 is the first entry.
-  (mapv (fn [b] (if (> b 127) (- b 256) b)) (hex->bytes (kvalues-iq4nl-hex)))))
+  (mapv (fn [b] (if (> b 127) (- b 256) b)) (hex->bytes kvalues-iq4nl-hex))))
 #?(:kotoba
    (defn iq3xxs-grid [] [:list :i64]
      (hex->bytes (iq3xxs-grid-hex)))
    :default
-(def iq3xxs-grid (hex->bytes (iq3xxs-grid-hex))))
+(def iq3xxs-grid (hex->bytes iq3xxs-grid-hex)))
 #?(:kotoba
    (defn iq3s-grid [] [:list :i64]
      (hex->bytes (iq3s-grid-hex)))
    :default
-(def iq3s-grid (hex->bytes (iq3s-grid-hex))))
+(def iq3s-grid (hex->bytes iq3s-grid-hex)))
 #?(:kotoba
    (defn iq2s-grid [] [:list :i64]
      (hex->bytes (iq2s-grid-hex)))
    :default
-(def iq2s-grid (hex->bytes (iq2s-grid-hex))))
+(def iq2s-grid (hex->bytes iq2s-grid-hex)))
 
 #?(:kotoba
    (defn digests [] [:map :keyword [:map :keyword :i64]]
